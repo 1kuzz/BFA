@@ -24,6 +24,12 @@
   .control-grid { display:grid; grid-template-columns:minmax(180px,1fr) minmax(160px,1fr) minmax(220px,2fr) auto; gap:8px; align-items:end; }
   .control label { display:block; color:#9fb2cc; font-size:11px; margin-bottom:5px; }
   .selection { color:#6ee7b7; font-size:12px; font-weight:700; }
+  .common { margin:14px 0; border-top:1px solid #256e67; padding-top:14px; }
+  .common-help { color:#9fb2cc; font-size:12px; margin:-6px 0 10px; }
+  .common-wrap { overflow:auto; max-height:360px; }
+  .common table { min-width:900px; }
+  .common input, .common select { width:100%; min-width:120px; }
+  .common code { color:#93c5fd; font-size:11px; }
   .preview { margin-top:12px; padding:12px; border:1px solid var(--line); border-radius:10px; background:#081421; white-space:pre-wrap; font:12px ui-monospace,monospace; display:none; max-height:260px; overflow:auto; }
   .approval { display:none; gap:8px; align-items:center; margin-top:10px; }
   .approval.show { display:flex; }
@@ -48,7 +54,16 @@
   td.long { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
   .wrap { overflow: auto; max-height: 68vh; }
   .empty { padding:40px; text-align:center; color:#9fb2cc; }
-  @media (max-width:900px) { .control-grid { grid-template-columns:1fr; } body { padding:12px; } }
+  @media (max-width:900px) {
+    .control-grid { grid-template-columns:1fr; } body { padding:12px; }
+    .common table { min-width:0; }
+    .common thead { display:none; }
+    .common tbody, .common tr, .common td { display:block; width:100%; }
+    .common tr { border:1px solid var(--line); border-radius:10px; padding:8px; margin-bottom:10px; }
+    .common td { border:0; padding:6px 0; }
+    .common td::before { content:attr(data-label); display:block; color:#9fb2cc; font-size:10px; margin-bottom:3px; }
+    .common .question-preview { width:100%; }
+  }
   @media print { .controls, .tabs, .control, .audit, .live { display:none; } th { position:static; } body { margin:0; background:#fff; color:#222; } }
 </style>
 </head>
@@ -65,13 +80,19 @@
     <section class="control" aria-labelledby="controlTitle">
       <div class="control-head">
         <div><h2 id="controlTitle">Управление формами</h2><div class="selection" id="selection">Выбрано: 0</div></div>
-        <div><button class="secondary" id="selectShown">Выбрать отфильтрованные</button> <button class="secondary" id="clearSelected">Очистить</button></div>
+        <div><button class="secondary" id="selectAll">Выбрать все формы</button> <button class="secondary" id="selectShown">Выбрать отфильтрованные</button> <button class="secondary" id="clearSelected">Очистить</button></div>
       </div>
+      <div class="common">
+        <h2>Общие вопросы выбранных форм</h2>
+        <div class="common-help">Показываются только вопросы, присутствующие во всех выбранных формах. Названия берутся из пользовательского label, технический ключ показан отдельно.</div>
+        <div class="common-wrap" id="commonQuestions">Выберите формы, чтобы увидеть общие вопросы.</div>
+      </div>
+      <h2>Расширенное массовое изменение</h2>
       <div class="control-grid">
         <div><label for="editKind">Изменение</label><select id="editKind">
           <option value="name">Имя формы</option><option value="title">Заголовок</option>
           <option value="buttonCaption">Текст кнопки</option><option value="successUrl">HTTPS-редирект</option>
-          <option value="preset">Существующее preset-поле</option><option value="required">Обязательность поля</option>
+          <option value="preset">Существующее preset-поле</option><option value="label">Текст вопроса</option><option value="required">Обязательность поля</option>
           <option value="visible">Видимость поля</option>
         </select></div>
         <div id="fieldWrap" style="display:none"><label for="editField">Поле</label><input id="editField" placeholder="CONTACT_EMAIL"></div>

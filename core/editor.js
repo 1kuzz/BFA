@@ -1,4 +1,4 @@
-var KINDS = ['name', 'title', 'buttonCaption', 'successUrl', 'preset', 'required', 'visible'];
+var KINDS = ['name', 'title', 'buttonCaption', 'successUrl', 'preset', 'label', 'required', 'visible'];
 
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 
@@ -39,7 +39,7 @@ export function normalizeOperation(operation) {
   if (out.kind === 'preset' && !/^[A-Z0-9_]+$/.test(out.field)) {
     throw new Error('Некорректное имя preset-поля');
   }
-  if ((out.kind === 'required' || out.kind === 'visible') && !out.field) {
+  if ((out.kind === 'label' || out.kind === 'required' || out.kind === 'visible') && !out.field) {
     throw new Error('Укажите поле формы');
   }
   if (out.kind === 'required' || out.kind === 'visible') {
@@ -47,7 +47,9 @@ export function normalizeOperation(operation) {
   } else {
     out.value = String(out.value == null ? '' : out.value).trim();
     if (out.value.length > 2000) throw new Error('Значение слишком длинное');
-    if (out.kind === 'name' && !out.value) throw new Error('Имя формы не может быть пустым');
+    if ((out.kind === 'name' || out.kind === 'label') && !out.value) {
+      throw new Error(out.kind === 'name' ? 'Имя формы не может быть пустым' : 'Текст вопроса не может быть пустым');
+    }
     if (out.kind === 'successUrl' && out.value) {
       var url;
       try { url = new URL(out.value); } catch (e) { throw new Error('Некорректный URL'); }

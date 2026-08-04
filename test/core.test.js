@@ -26,6 +26,11 @@ test('editor validates, patches, and reads only supported form settings', functi
   assert.equal(form.presetFields[0].value, 'EN_1');
   assert.equal(editRisk(operation), 'MEDIUM');
 
+  var renamed = applyEdit(form, {
+    formId: 42, kind: 'label', field: 'CONTACT_EMAIL', value: 'Рабочий email'
+  });
+  assert.equal(readEditValue(renamed.options, renamed.operation), 'Рабочий email');
+
   assert.throws(function () {
     normalizeOperation({ formId: 42, kind: 'successUrl', value: 'http://example.com' });
   }, /HTTPS/);
@@ -55,7 +60,7 @@ test('analyzer produces stable rows, exports, and diffs', function () {
       data: {
         language: 'ru',
         fields: [
-          { name: 'CONTACT_EMAIL', visible: true, required: true },
+          { name: 'CONTACT_EMAIL', label: 'Рабочий email', visible: true, required: true },
           { name: 'CONTACT_NAME', visible: true, required: false }
         ],
         agreements: []
@@ -72,6 +77,9 @@ test('analyzer produces stable rows, exports, and diffs', function () {
   var result = analyze(raw, DEFAULT_REQUIREMENTS, {}, 0.9);
   assert.equal(result.rows.length, 1);
   assert.equal(result.rows[0].severity, 'OK');
+  assert.deepEqual(result.rows[0].questions[0], {
+    name: 'CONTACT_EMAIL', label: 'Рабочий email', required: true, visible: true
+  });
   assert.equal(JSON.parse(toJsonl(result.rows)).id, '42');
 
   var previous = buildSnapshot(result.rows);

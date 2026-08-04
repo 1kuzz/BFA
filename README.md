@@ -34,8 +34,8 @@ sync, region-specific rule profiles, run history, and optional alerting.
 The v6 redesign combines 10 operational features in one workflow:
 
 1. **Fleet command center** — dense health KPIs, charts, risk queues, and searchable inventory.
-2. **Bulk scope control** — select individual forms or every row in the current smart filter.
-3. **Safe editor** — change names, titles, buttons, HTTPS redirects, existing presets, and field visibility/required state.
+2. **Bulk scope control** — select individual forms, every filtered row, or the complete form fleet.
+3. **Common-question editor** — intersect selected forms by technical field key, show human-readable question labels, and bulk-edit label, visibility, and required state.
 4. **Exact dry-run preview** — fetches fresh forms and shows before/after values before any mutation.
 5. **Risk-aware changes** — every edit is labeled LOW, MEDIUM, or HIGH.
 6. **Explicit approval** — applying requires the generated `APPLY N` confirmation within 15 minutes.

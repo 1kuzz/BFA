@@ -162,6 +162,9 @@ function renderTabs() {
 }
 
 function render() {
+  var validIds = {};
+  R.rows.forEach(function (row) { validIds[row.id] = true; });
+  Object.keys(selected).forEach(function (id) { if (!validIds[id]) delete selected[id]; });
   $('meta').textContent = 'Профиль: ' + R.profile + ' · ' + new Date(R.generatedAt).toLocaleString('ru-RU') +
     ' · форм: ' + R.rows.length + ' · ср. Score: ' + R.avgScore +
     ' · ' + R.perfStats.totalSec + 'с · cache-hit ' + R.perfStats.cacheHitPct + '%';
@@ -196,13 +199,90 @@ function render() {
   $('dashboard').style.display = 'block';
 }
 
+function stateLabel(values) {
+  var unique = {};
+  values.forEach(function (value) { unique[String(value)] = true; });
+  if (Object.keys(unique).length > 1) return 'Смешано';
+  return values[0] ? 'Да' : 'Нет';
+}
+
+function renderCommonQuestions() {
+  if (!R) return;
+  var rows = R.rows.filter(function (row) { return selected[row.id]; });
+  if (!rows.length) { $('commonQuestions').textContent = 'Выберите формы, чтобы увидеть общие вопросы.'; return; }
+  if (rows.some(function (row) { return !Array.isArray(row.questions); })) {
+    $('commonQuestions').textContent = 'Запустите полный анализ после обновления BFA, чтобы загрузить названия вопросов.';
+    return;
+  }
+
+  var common = {};
+  rows[0].questions.forEach(function (question) {
+    common[question.name] = {
+      name: question.name, labels: [question.label || question.name],
+      required: [question.required], visible: [question.visible]
+    };
+  });
+  rows.slice(1).forEach(function (row) {
+    var byName = {};
+    row.questions.forEach(function (question) { byName[question.name] = question; });
+    Object.keys(common).forEach(function (name) {
+      var question = byName[name];
+      if (!question) { delete common[name]; return; }
+      common[name].labels.push(question.label || question.name);
+      common[name].required.push(question.required);
+      common[name].visible.push(question.visible);
+    });
+  });
+
+  var questions = Object.keys(common).map(function (name) { return common[name]; });
+  questions.sort(function (a, b) { return a.labels[0].localeCompare(b.labels[0], 'ru'); });
+  if (!questions.length) { $('commonQuestions').textContent = 'У выбранных форм нет общих вопросов.'; return; }
+
+  $('commonQuestions').innerHTML = '<table><thead><tr><th>Вопрос</th><th>Технический ключ</th><th>Обяз.</th><th>Виден</th><th>Новое название</th><th>Обяз.</th><th>Виден</th><th></th></tr></thead><tbody>' +
+    questions.map(function (question) {
+      var labels = Array.from(new Set(question.labels));
+      var original = labels.length === 1 ? labels[0] : '';
+      var title = labels.length === 1 ? labels[0] : 'Разные названия: ' + labels.join(' / ');
+      return '<tr data-question="' + esc(question.name) + '"><td data-label="Вопрос" title="' + esc(title) + '">' + esc(title) +
+        '</td><td data-label="Технический ключ"><code>' + esc(question.name) + '</code></td><td data-label="Сейчас обязательный">' + esc(stateLabel(question.required)) +
+        '</td><td data-label="Сейчас виден">' + esc(stateLabel(question.visible)) + '</td><td data-label="Новое название"><input class="question-label" data-original="' +
+        esc(original) + '" value="' + esc(original) + '" placeholder="Введите единое название"></td>' +
+        '<td data-label="Новая обязательность"><select class="question-required"><option value="keep">Не менять</option><option value="true">Да</option><option value="false">Нет</option></select></td>' +
+        '<td data-label="Новая видимость"><select class="question-visible"><option value="keep">Не менять</option><option value="true">Да</option><option value="false">Нет</option></select></td>' +
+        '<td data-label="Проверка"><button class="question-preview">Preview</button></td></tr>';
+    }).join('') + '</tbody></table>';
+
+  [].forEach.call($('commonQuestions').querySelectorAll('.question-preview'), function (button) {
+    button.onclick = function () {
+      var row = button.closest('tr'), field = row.getAttribute('data-question');
+      var labelInput = row.querySelector('.question-label');
+      var label = labelInput.value.trim(), original = labelInput.getAttribute('data-original');
+      var required = row.querySelector('.question-required').value;
+      var visible = row.querySelector('.question-visible').value;
+      var operations = [];
+      Object.keys(selected).forEach(function (id) {
+        if (label && label !== original) operations.push({ formId: id, kind: 'label', field: field, value: label });
+        if (required !== 'keep') operations.push({ formId: id, kind: 'required', field: field, value: required === 'true' });
+        if (visible !== 'keep') operations.push({ formId: id, kind: 'visible', field: field, value: visible === 'true' });
+      });
+      if (!operations.length) {
+        $('editPreview').textContent = 'Укажите новое название, обязательность или видимость.';
+        $('editPreview').style.display = 'block';
+        return;
+      }
+      requestPreview(operations);
+    };
+  });
+}
+
 function updateSelection() {
   $('selection').textContent = 'Выбрано: ' + Object.keys(selected).length;
+  renderCommonQuestions();
 }
 
 function updateEditor() {
   var kind = $('editKind').value;
-  var needsField = kind === 'preset' || kind === 'required' || kind === 'visible';
+  var needsField = kind === 'preset' || kind === 'label' || kind === 'required' || kind === 'visible';
   var isBoolean = kind === 'required' || kind === 'visible';
   $('fieldWrap').style.display = needsField ? 'block' : 'none';
   $('editValue').style.display = isBoolean ? 'none' : 'block';
@@ -254,19 +334,18 @@ function loadAudit() {
 }
 
 $('editKind').onchange = updateEditor;
+$('selectAll').onclick = function () {
+  R.rows.forEach(function (row) { selected[row.id] = true; });
+  updateSelection(); renderTable();
+};
 $('selectShown').onclick = function () {
   lastFiltered.forEach(function (row) { selected[row.id] = true; });
   updateSelection(); renderTable();
 };
 $('clearSelected').onclick = function () { selected = {}; updateSelection(); renderTable(); };
-$('previewEdits').onclick = function () {
-  var ids = Object.keys(selected);
-  if (!ids.length) { $('editPreview').textContent = 'Выберите хотя бы одну форму.'; $('editPreview').style.display = 'block'; return; }
-  var kind = $('editKind').value;
-  var value = (kind === 'required' || kind === 'visible') ? $('editBoolean').value === 'true' : $('editValue').value;
-  var operations = ids.map(function (id) {
-    return { formId: id, kind: kind, field: $('editField').value.trim(), value: value };
-  });
+function requestPreview(operations) {
+  pendingPlan = null;
+  $('approval').className = 'approval';
   $('previewEdits').disabled = true;
   $('editPreview').textContent = 'Загружаю свежие формы из Bitrix24...';
   $('editPreview').style.display = 'block';
@@ -275,6 +354,15 @@ $('previewEdits').onclick = function () {
     if (!response || !response.ok) { $('editPreview').textContent = 'Ошибка preview: ' + ((response || {}).error || 'нет ответа'); return; }
     pendingPlan = response.plan; renderPlan(pendingPlan);
   });
+}
+$('previewEdits').onclick = function () {
+  var ids = Object.keys(selected);
+  if (!ids.length) { $('editPreview').textContent = 'Выберите хотя бы одну форму.'; $('editPreview').style.display = 'block'; return; }
+  var kind = $('editKind').value;
+  var value = (kind === 'required' || kind === 'visible') ? $('editBoolean').value === 'true' : $('editValue').value;
+  requestPreview(ids.map(function (id) {
+    return { formId: id, kind: kind, field: $('editField').value.trim(), value: value };
+  }));
 };
 $('applyEdits').onclick = function () {
   if (!pendingPlan) return;
