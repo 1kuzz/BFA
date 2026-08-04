@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { runPool } from '../core/api.js';
+import { cacheNamespace } from '../core/cache.js';
 import { applyEdit, editRisk, normalizeOperation, readEditValue } from '../core/editor.js';
 import { DEFAULT_PROFILES, DEFAULT_REQUIREMENTS, makeValidator, scoreForm } from '../core/rules.js';
 import { acceptsCrmHost, acceptsCrmUrl, crmScope } from '../core/scope.js';
@@ -25,10 +26,11 @@ test('RU profile is isolated to the Russian CRM instance', function () {
 
 test('editor validates, patches, and reads only supported form settings', function () {
   var form = {
-    name: 'Old', data: { title: 'Title', buttonCaption: 'Send', fields: [
-      { name: 'CONTACT_EMAIL', visible: true, required: false }
-    ] },
+    name: 'Old',
     presetFields: [{ fieldName: 'UF_CRM_CONSENT_VERSION', value: 'EN_1' }],
+    data: { title: 'Title', buttonCaption: 'Send', fields: [
+      { name: 'CONTACT_EMAIL', visible: true, required: false }
+    ], agreements: [{ id: 9, label: 'Old privacy text' }] },
     result: { success: { url: 'https://example.com/old' } }
   };
   var operation = normalizeOperation({
@@ -44,6 +46,9 @@ test('editor validates, patches, and reads only supported form settings', functi
     formId: 42, kind: 'label', field: 'CONTACT_EMAIL', value: 'Рабочий email'
   });
   assert.equal(readEditValue(renamed.options, renamed.operation), 'Рабочий email');
+  var agreement = applyEdit(form, { formId: 42, kind: 'agreement', field: '9', value: 'Canonical text' });
+  assert.equal(readEditValue(agreement.options, agreement.operation), 'Canonical text');
+  assert.equal(editRisk(agreement.operation), 'HIGH');
 
   assert.throws(function () {
     normalizeOperation({ formId: 42, kind: 'successUrl', value: 'http://example.com' });
@@ -98,6 +103,18 @@ test('preset rules and scoring report unsafe forms', function () {
     presetIssues: [], hasVisitorId: true
   }, DEFAULT_PROFILES.Default.requirements);
   assert.equal(wrongLocale.severity, 'CRIT');
+  var missingCaptcha = scoreForm({
+    consentVersion: 'BTX v1', language: 'ru', hasEmail: true, redirectIssue: '', captcha: 'N',
+    presetIssues: [], hasVisitorId: true
+  }, DEFAULT_PROFILES.RU.requirements);
+  assert.equal(missingCaptcha.severity, 'CRIT');
+});
+
+test('cache namespaces isolate RU and EU forms, snapshots, and history', function () {
+  var eu = cacheNamespace('Default'), ru = cacheNamespace('RU');
+  assert.notEqual(eu.formPrefix + '42', ru.formPrefix + '42');
+  assert.notEqual(eu.snapshot, ru.snapshot);
+  assert.notEqual(eu.historyPrefix, ru.historyPrefix);
 });
 
 test('profile exclusions remove LATAM without treating Brazil as LATAM by default', function () {
@@ -176,8 +193,43 @@ test('agreement conflicts affect forms and exact duplicates expose redirect-only
   assert.equal(result.rows[0].severity, 'CRIT');
   assert.match(result.rows[0].crit, /конфликт текста соглашения 9/);
   assert.equal(result.clusters[0].category, 'redirect_only');
+  assert.deepEqual(result.clusters[0].diffMatrix.find(function (row) { return row.key === 'redirect'; }).values, {
+    '1': 'https://example.com/a', '2': 'https://example.com/b'
+  });
+  assert.equal(result.agrConflicts[0].textVariants[0].formIds.length, 1);
   var sheets = buildSheets(result, { errors: 0 }, [], [], 2, 0.9);
   assert.equal(sheets['Дубли'][1][2], 'одинаковые поля, только другой редирект');
+});
+
+test('near-duplicate matrix names the missing field and per-form values', function () {
+  function form(fields) {
+    return {
+      name: 'EMEA_en_Download', data: { language: 'en', fields: fields.map(function (name) {
+        return { name: name, label: name, visible: true, required: false };
+      }), agreements: [] },
+      presetFields: [
+        { fieldName: 'UF_CRM_CONSENT_VERSION', value: 'EN_1' },
+        { fieldName: 'UF_CRM_VISITOR_ID', value: '%UF_VISITOR_ID%' }
+      ], result: { success: { url: 'https://example.com/thanks' } }
+    };
+  }
+  var fields = ['CONTACT_EMAIL', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9'];
+  var result = analyze({ '1': form(fields), '2': form(fields.slice(0, 9)) },
+    DEFAULT_PROFILES.Default.requirements, DEFAULT_PROFILES.Default.presetRules, 0.9);
+  assert.equal(result.clusters[0].category, 'near_duplicate');
+  assert.deepEqual(result.clusters[0].diffFields, ['F9']);
+  assert.deepEqual(result.clusters[0].diffMatrix.find(function (row) { return row.key === 'F9:presence'; }).values,
+    { '1': 'Да', '2': '—' });
+
+  var left = form(fields), right = form(fields);
+  right.data.fields[0].label = 'Рабочий email'; right.data.fields[0].required = true;
+  right.data.fields[0].visible = false;
+  var questionResult = analyze({ '1': left, '2': right },
+    DEFAULT_PROFILES.Default.requirements, DEFAULT_PROFILES.Default.presetRules, 0.9);
+  var keys = questionResult.clusters[0].diffMatrix.map(function (row) { return row.key; });
+  assert.ok(keys.includes('CONTACT_EMAIL:label'));
+  assert.ok(keys.includes('CONTACT_EMAIL:required'));
+  assert.ok(keys.includes('CONTACT_EMAIL:visible'));
 });
 
 test('worker pool respects its concurrency limit and reports completion', async function () {

@@ -3,7 +3,8 @@ var $ = function (id) { return document.getElementById(id); };
 var DEFAULT_REQ = {
   requireVisitorId: true, requireMarketoId: false, requireEmail: true,
   requireCaptcha: false, requireConsentVersion: true, requireHttpsRedirect: true,
-  invalidConsentVersionPatterns: ['^test$', '^ex_', '^EN_2$'], nonEnglishEn1Severity: 'CRIT'
+  invalidConsentVersionPatterns: ['^test$', '^ex_', '^EN_2$'], nonEnglishEn1Severity: 'CRIT',
+  captchaSeverity: 'WARN'
 };
 var DEFAULT_PRESET = {
   'UF_CRM_CONSENT': '^Y$', 'UF_CRM_SUBSCRIPTION': '^Y$',
@@ -19,7 +20,10 @@ var DEFAULT_PROFILES = {
     exclusions: { languages: ['la'], regions: ['Americas'] }
   },
   'RU': {
-    requirements: Object.assign({}, DEFAULT_REQ, { requireCaptcha: true, invalidConsentVersionPatterns: DEFAULT_REQ.invalidConsentVersionPatterns.slice() }),
+    requirements: Object.assign({}, DEFAULT_REQ, {
+      requireCaptcha: true, captchaSeverity: 'CRIT',
+      invalidConsentVersionPatterns: DEFAULT_REQ.invalidConsentVersionPatterns.slice()
+    }),
     presetRules: Object.assign({}, DEFAULT_PRESET, {
       'UF_CRM_CONSENT_VERSION': '^(?:[Bb][Tt][Xx]|[Rr][Uu](?: [A-Za-zА-Яа-я0-9]+)+) [Vv]\\d+$',
       'UF_CRM_SUBSCRIPTION_VERSION': '^(?:[Bb][Tt][Xx]|[Rr][Uu](?: [A-Za-zА-Яа-я0-9]+)+) [Vv]\\d+$'
@@ -88,6 +92,8 @@ chrome.storage.local.get(['settings', 'profiles', 'activeProfile'], function (d)
     }
   });
   ru.requirements = Object.assign({}, DEFAULT_REQ, ru.requirements || {});
+  if (!ru.requirements.captchaSeverity || ru.requirements.captchaSeverity === 'WARN')
+    ru.requirements.captchaSeverity = 'CRIT';
   ru.exclusions = ru.exclusions || { languages: [], regions: [] };
   state.profiles.Default.requirements = Object.assign({}, DEFAULT_REQ, state.profiles.Default.requirements || {});
   state.profiles.Default.exclusions = state.profiles.Default.exclusions || { languages: ['la'], regions: ['Americas'] };

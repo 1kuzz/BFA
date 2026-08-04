@@ -61,8 +61,8 @@ export function buildSheets(A, perfStats, diffChanges, timelineRows, concurrency
   var redirSheet = [['ID', 'Имя', 'Язык', 'Редирект', 'Проблема']];
   rows.filter(function (r) { return r.redirectIssue; }).forEach(function (r) { redirSheet.push([r.id, r.name, r.language, r.redirect, r.redirectIssue]); });
 
-  var presetValSheet = [['ID', 'Поле', 'Значение', 'Проблема']];
-  presetIssuesAll.forEach(function (p) { presetValSheet.push([p.id, p.field, p.value, p.issue]); });
+  var presetValSheet = [['ID', 'Поле', 'Значение', 'Проблема', 'Решение']];
+  presetIssuesAll.forEach(function (p) { presetValSheet.push([p.id, p.field, p.value, p.issue, p.decision || '']); });
 
   var autoSheet = [['ID', 'Имя', 'Callback', 'WhatsApp', 'Integration cases', 'Payment', 'Ответственный']];
   rows.forEach(function (r) { autoSheet.push([r.id, r.name, r.callback, r.whatsapp, r.integration, r.payment, r.responsible]); });
@@ -94,7 +94,8 @@ export function buildSheets(A, perfStats, diffChanges, timelineRows, concurrency
     var fallback = c.exact ? 'полный дубль' : 'почти (' + Math.round(dupTh * 100) + '%+)';
     dupSheet.push([c.lang, c.size, duplicateLabels[c.category] || fallback, c.differences || '', c.ids.join(', ')]);
   });
-  var anomSheet = [['Поле', 'В формах', 'Проблема']]; anomalies.forEach(function (a) { anomSheet.push([a.field, a.count, a.flags]); });
+  var anomSheet = [['Поле', 'В формах', 'Проблема', 'Решение']];
+  anomalies.forEach(function (a) { anomSheet.push([a.field, a.count, a.flags, a.decision || 'Ручная проверка']); });
   var consistSheet = [['Тип формы', 'Поле', 'Присутствует', 'Обязательное', 'Замечание']]; consistency.forEach(function (c) { consistSheet.push([c.formType, c.field, c.present, c.required, c.note]); });
   var agrConflSheet = [['Agreement ID', 'Name', 'Вариантов текста', 'Форм']]; agrConflicts.forEach(function (c) { agrConflSheet.push([c.id, c.name, c.variants, c.forms]); });
 

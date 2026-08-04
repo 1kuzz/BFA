@@ -14,7 +14,8 @@ export var DEFAULT_REQUIREMENTS = {
   requireConsentVersion: true,
   requireHttpsRedirect: true,
   invalidConsentVersionPatterns: ['^test$', '^ex_', '^EN_2$'],
-  nonEnglishEn1Severity: 'CRIT'
+  nonEnglishEn1Severity: 'CRIT',
+  captchaSeverity: 'WARN'
 };
 
 /* Паттерны preset-значений. Ключ regexp хранится строкой,
@@ -43,6 +44,7 @@ export var DEFAULT_PROFILES = {
   'RU': {
     requirements: Object.assign({}, DEFAULT_REQUIREMENTS, {
       requireCaptcha: true,
+      captchaSeverity: 'CRIT',
       invalidConsentVersionPatterns: DEFAULT_REQUIREMENTS.invalidConsentVersionPatterns.slice()
     }),
     presetRules: Object.assign({}, DEFAULT_PRESET_RULES, {
@@ -113,7 +115,8 @@ export function scoreForm(ctx, RULES) {
   }
   if (ctx.redirectIssue && ctx.redirectIssue.indexOf('HTTP') === -1)
     add(warn, 'redirect:other', 'редирект: ' + ctx.redirectIssue);
-  if (RULES.requireCaptcha && ctx.captcha === 'N') add(warn, 'captcha:missing', 'нет captcha');
+  if (RULES.requireCaptcha && ctx.captcha === 'N')
+    add(RULES.captchaSeverity === 'CRIT' ? crit : warn, 'captcha:missing', 'нет captcha');
 
   if (RULES.requireVisitorId && !ctx.hasVisitorId) add(info, 'field:visitor', 'нет VisitorID');
   if (RULES.requireMarketoId && !ctx.hasMarketoId) add(info, 'field:marketo', 'нет Marketo ID');

@@ -10,6 +10,8 @@
   h1 { color:#fff; font-size:24px; margin:0 0 5px; letter-spacing:-.02em; }
   h2 { margin:0 0 12px; font-size:16px; color:#fff; }
   .meta { font-size:12px; color:#9fb2cc; }
+  .run-delta { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  .delta-chip { padding:5px 8px; border-radius:999px; background:#0b1728; border:1px solid var(--line); font-size:11px; }
   .live { padding:7px 11px; border:1px solid #34d399; border-radius:999px; color:#6ee7b7; font-size:11px; font-weight:800; letter-spacing:.08em; }
   .stats { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px; min-width:130px; }
@@ -20,6 +22,13 @@
   .charts { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; }
   .chart { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 16px; flex:1; min-width:220px; }
   .chart h3 { margin: 0 0 8px; font-size: 13px; }
+  .chart-body { display:flex; gap:14px; align-items:center; }
+  .legend { display:grid; gap:5px; font-size:11px; min-width:110px; }
+  .legend i { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+  .bar-list { display:grid; gap:7px; }
+  .bar-row { display:grid; grid-template-columns:minmax(70px,1fr) 3fr auto; align-items:center; gap:8px; font-size:11px; }
+  .bar-track { height:8px; overflow:hidden; border-radius:999px; background:var(--panel-soft); }
+  .bar-fill { display:block; height:100%; min-width:2px; border-radius:inherit; }
   .control { background:linear-gradient(135deg,#111c2f,#102b2d); border:1px solid #256e67; border-radius:14px; padding:18px; margin-bottom:16px; }
   .control-head { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
   .control-grid { display:grid; grid-template-columns:minmax(180px,1fr) minmax(160px,1fr) minmax(220px,2fr) auto; gap:8px; align-items:end; }
@@ -31,6 +40,9 @@
   .common table { min-width:900px; }
   .common input, .common select { width:100%; min-width:120px; }
   .common code { color:#93c5fd; font-size:11px; }
+  .agreement-editor { display:none; margin:14px 0; padding:14px; border:1px solid var(--warn); border-radius:var(--radius); background:#241f13; }
+  .agreement-editor.show { display:block; animation:toast-in .16s ease; }
+  .agreement-editor textarea { width:100%; min-height:110px; margin:8px 0; }
   .preview { margin-top:12px; padding:12px; border:1px solid var(--line); border-radius:10px; background:#081421; white-space:pre-wrap; font:12px ui-monospace,monospace; display:none; max-height:260px; overflow:auto; animation:toast-in .16s ease; }
   .approval { display:none; gap:8px; align-items:center; margin-top:10px; }
   .approval.show { display:flex; animation:toast-in .16s ease; }
@@ -54,8 +66,27 @@
   th, td { border:1px solid var(--line); padding:7px 8px; text-align:left; vertical-align:top; }
   th { background:#123b3a; color:#fff; position:sticky; top:0; cursor:pointer; white-space:nowrap; }
   td.long { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
-  tbody tr { transition:background .14s ease,transform .14s ease; }
-  tbody tr:hover { filter:brightness(1.14); }
+  tbody tr { background:var(--panel); transition:background .14s ease,transform .14s ease; }
+  tbody tr:hover { background:#17243a; }
+  .sev-row td:first-child { border-left:4px solid var(--line); }
+  .sev-row.sev-CRIT td:first-child { border-left-color:var(--crit); }
+  .sev-row.sev-WARN td:first-child { border-left-color:var(--warn); }
+  .sev-row.sev-INFO td:first-child { border-left-color:var(--info); }
+  .sev-row.sev-OK td:first-child { border-left-color:var(--brand); }
+  .sev-chip { display:inline-block; padding:3px 7px; border-radius:999px; background:#17253a; font-size:10px; font-weight:800; }
+  .sev-CRIT .sev-chip { color:var(--crit); background:#3b1725; }
+  .sev-WARN .sev-chip { color:var(--warn); background:#382d14; }
+  .sev-INFO .sev-chip { color:var(--info); background:#142a42; }
+  .sev-OK .sev-chip { color:var(--brand); background:#0b2b28; }
+  .duplicate-open { padding:4px 7px; white-space:nowrap; }
+  .duplicate-badge { margin-left:5px; color:#67e8f9; border:1px solid #155e75; background:#0c2b38; }
+  .reason-groups { display:none; gap:6px; flex-wrap:wrap; margin:0 0 10px; }
+  .reason-groups.show { display:flex; }
+  dialog { width:min(1100px,94vw); max-height:88vh; color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:var(--radius-lg); box-shadow:var(--shadow); }
+  dialog::backdrop { background:rgba(3,8,18,.78); }
+  .dialog-head { display:flex; justify-content:space-between; gap:12px; align-items:start; position:sticky; top:0; background:var(--panel); padding-bottom:10px; }
+  .diff-matrix { overflow:auto; max-height:68vh; }
+  .diff-cell { background:#3b2530; color:#fecdd3; }
   .common details { max-width:260px; color:#9fb2cc; margin-bottom:5px; }
   .common summary { cursor:pointer; color:#93c5fd; }
   #pager { display:inline-flex; align-items:center; gap:6px; margin-left:auto; }
@@ -80,7 +111,7 @@
 </head>
 <body>
   <header class="hero">
-    <div><h1>BFA Control Center</h1><div class="meta" id="meta"></div></div>
+    <div><h1>BFA Control Center</h1><div class="meta" id="meta"></div><div class="run-delta" id="runDelta"></div></div>
     <span class="live">LIVE GOVERNANCE</span>
   </header>
 
@@ -94,9 +125,16 @@
         <div><button class="secondary" id="selectAll">Выбрать все формы</button> <button class="secondary" id="selectShown">Выбрать отфильтрованные</button> <button class="secondary" id="clearSelected">Очистить</button></div>
       </div>
       <div class="common">
-        <div class="control-head"><h2>Общие вопросы выбранных форм</h2><label>Порог большинства: <output id="commonThresholdValue">80%</output> <input id="commonThreshold" type="range" min="50" max="100" value="80"></label></div>
+        <div class="control-head"><div><h2>Общие вопросы выбранных форм</h2><div class="selection" id="commonImpact"></div></div><label>Порог большинства: <output id="commonThresholdValue">80%</output> <input id="commonThreshold" type="range" min="50" max="100" value="80"></label></div>
         <div class="common-help">Вопрос считается общим, когда встречается минимум в указанной доле выборки. Исключения можно проверить и убрать из выделения.</div>
         <div class="common-wrap" id="commonQuestions">Выберите формы, чтобы увидеть общие вопросы.</div>
+      </div>
+      <div class="agreement-editor" id="agreementEditor">
+        <div class="control-head"><h2 id="agreementTitle">Единый текст соглашения</h2><button class="secondary" id="closeAgreement">Закрыть</button></div>
+        <label for="agreementVariant">Канонический вариант</label><select id="agreementVariant"></select>
+        <label for="agreementText">Текст соглашения</label><textarea id="agreementText"></textarea>
+        <div class="selection" id="agreementImpact"></div>
+        <button id="previewAgreement">Preview через approval-flow</button>
       </div>
       <h2>Расширенное массовое изменение</h2>
       <div class="control-grid">
@@ -117,6 +155,7 @@
     <section class="audit"><h2>Журнал изменений</h2><div id="audit">Изменений пока нет.</div></section>
 
     <div class="tabs" id="tabs"></div>
+    <div class="reason-groups" id="reasonGroups"></div>
 
     <div class="controls">
       <input class="q" id="q" placeholder="Поиск...">
@@ -133,6 +172,10 @@
     <strong>Данных анализа пока нет</strong><br>Откройте Bitrix24 и запустите анализ из попапа расширения.
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite" style="display:none"></div>
+  <dialog id="duplicateDialog" aria-labelledby="duplicateDialogTitle">
+    <div class="dialog-head"><div><h2 id="duplicateDialogTitle">Сравнение дублей</h2><div class="meta" id="duplicateDialogMeta"></div></div><button class="secondary" id="closeDuplicate">Закрыть</button></div>
+    <div class="diff-matrix" id="duplicateMatrix"></div>
+  </dialog>
 
   <script src="report.js"></script>
 </body>

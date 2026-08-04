@@ -10,6 +10,15 @@
 var DB_NAME = 'bxFormsAnalyzer', VER = 3;
 export var STORE = 'forms', HIST = 'history', META = 'meta';
 
+export function cacheNamespace(profileName) {
+  var id = encodeURIComponent(String(profileName || 'Default'));
+  return {
+    formPrefix: 'profile:' + id + ':form:',
+    snapshot: '__snapshot__:' + id,
+    historyPrefix: id + '|'
+  };
+}
+
 export function openDb() {
   return new Promise(function (res, rej) {
     var q = indexedDB.open(DB_NAME, VER);

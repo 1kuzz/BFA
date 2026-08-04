@@ -5,6 +5,7 @@ var R = null; // lastResult
 var currentTab = 'forms';
 var selected = {}, lastFiltered = [], pendingPlan = null;
 var page = 1, pageSize = 100;
+var clusterByForm = {}, rowById = {}, activeAgreement = null;
 
 function toast(message) {
   $('toast').textContent = message; $('toast').style.display = 'block';
@@ -13,7 +14,9 @@ function toast(message) {
 
 $('print').onclick = function () { window.print(); };
 
-var sevColor = { CRIT: '#3b1725', WARN: '#382d14', INFO: '#142a42', OK: '#111c2f' };
+function html(value, text) { return { html: value, text: text || '' }; }
+function cellText(value) { return value && value.html != null ? value.text || '' : String(value == null ? '' : value); }
+function cellHtml(value) { return value && value.html != null ? value.html : esc(value); }
 
 function distrib(rows, key) {
   var map = {};
@@ -21,29 +24,37 @@ function distrib(rows, key) {
   return Object.keys(map).sort(function (a, b) { return map[b] - map[a]; }).map(function (v) { return [v, map[v]]; });
 }
 
-function barSVG(data, color) {
-  var max = Math.max.apply(null, data.map(function (d) { return d[1]; })) || 1;
-  var bw = 100 / (data.length || 1);
-  return '<svg viewBox="0 0 100 42" preserveAspectRatio="none" style="width:100%;height:120px">' +
-    data.map(function (d, i) { var h = d[1] / max * 32; return '<rect x="' + (i * bw + 1) + '" y="' + (38 - h) + '" width="' + (bw - 2) + '" height="' + h + '" fill="' + color + '"><title>' + esc(d[0]) + ': ' + d[1] + '</title></rect>'; }).join('') +
-    data.map(function (d, i) { return '<text x="' + (i * bw + bw / 2) + '" y="41.5" font-size="1.6" text-anchor="middle" fill="#555">' + esc(String(d[0]).slice(0, 6)) + '</text>'; }).join('') +
-    '</svg>';
+function topWithOther(data, limit) {
+  if (data.length <= limit) return data;
+  return data.slice(0, limit).concat([['Остальные', data.slice(limit).reduce(function (sum, item) { return sum + item[1]; }, 0)]]);
 }
-function donutSVG(data, colors) {
-  var positive = data.filter(function (d) { return d[1] > 0; });
-  if (positive.length === 1) {
-    return '<svg viewBox="0 0 32 32" style="width:120px;height:120px"><circle cx="16" cy="16" r="12" fill="' +
-      colors[0] + '"><title>' + esc(positive[0][0]) + ': ' + positive[0][1] +
-      '</title></circle><circle cx="16" cy="16" r="6" fill="#111c2f"/></svg>';
-  }
+function barChart(data, color) {
+  data = topWithOther(data, 8);
+  var max = Math.max.apply(null, data.map(function (item) { return item[1]; })) || 1;
+  var total = data.reduce(function (sum, item) { return sum + item[1]; }, 0) || 1;
+  return '<div class="bar-list">' + data.map(function (item) {
+    var pct = Math.round(item[1] * 1000 / total) / 10;
+    return '<div class="bar-row" title="' + esc(item[0]) + ': ' + item[1] + ' (' + pct + '%)"><span>' + esc(item[0]) +
+      '</span><span class="bar-track"><i class="bar-fill" style="width:' + Math.max(2, item[1] * 100 / max) + '%;background:' + color + '"></i></span><b>' +
+      item[1] + ' · ' + pct + '%</b></div>';
+  }).join('') + '</div>';
+}
+function donutChart(data, colors) {
   var tot = data.reduce(function (a, d) { return a + d[1]; }, 0) || 1, acc = 0;
-  var segs = data.map(function (d, i) {
+  var positive = data.map(function (item, index) { return item[1] > 0 ? index : -1; }).filter(function (index) { return index >= 0; });
+  var segs = positive.length === 1 ? '<circle cx="16" cy="16" r="12" fill="' + colors[positive[0] % colors.length] + '"/>' : data.map(function (d, i) {
     var frac = d[1] / tot, a0 = acc * 2 * Math.PI, a1 = (acc + frac) * 2 * Math.PI; acc += frac;
     var x0 = 16 + 12 * Math.sin(a0), y0 = 16 - 12 * Math.cos(a0), x1 = 16 + 12 * Math.sin(a1), y1 = 16 - 12 * Math.cos(a1);
     var large = frac > 0.5 ? 1 : 0;
     return '<path d="M16,16 L' + x0.toFixed(2) + ',' + y0.toFixed(2) + ' A12,12 0 ' + large + ',1 ' + x1.toFixed(2) + ',' + y1.toFixed(2) + ' Z" fill="' + colors[i % colors.length] + '"><title>' + esc(d[0]) + ': ' + d[1] + '</title></path>';
   }).join('');
-  return '<svg viewBox="0 0 32 32" style="width:120px;height:120px">' + segs + '<circle cx="16" cy="16" r="6" fill="#111c2f"/></svg>';
+  var legend = data.map(function (item, i) {
+    if (item[1] <= 0) return '';
+    return '<span><i style="background:' + colors[i % colors.length] + '"></i>' + esc(item[0]) + ' <b>' + item[1] +
+      '</b> · ' + Math.round(item[1] * 1000 / tot) / 10 + '%</span>';
+  }).join('');
+  return '<div class="chart-body"><svg viewBox="0 0 32 32" style="width:120px;height:120px;flex:none">' + segs +
+    '<circle cx="16" cy="16" r="6" fill="#111c2f"/></svg><div class="legend">' + legend + '</div></div>';
 }
 function sparkline(key, color) {
   var values = (R.historyStats || []).map(function (item) { return item[key]; }).filter(function (v) { return typeof v === 'number'; });
@@ -53,6 +64,18 @@ function sparkline(key, color) {
     return (i * 80 / (values.length - 1)).toFixed(1) + ',' + (16 - (value - min) * 14 / span).toFixed(1);
   }).join(' ');
   return '<svg class="spark" viewBox="0 0 80 18" preserveAspectRatio="none" aria-label="Тренд"><polyline points="' + points + '" fill="none" stroke="' + color + '" stroke-width="2"/></svg>';
+}
+function renderRunDelta() {
+  var history = R.historyStats || [], chips = [];
+  if (history.length > 1) {
+    var previous = history[history.length - 2], current = history[history.length - 1];
+    var critDelta = current.CRIT - previous.CRIT;
+    var scoreDelta = current.avgScore == null || previous.avgScore == null ? null : current.avgScore - previous.avgScore;
+    chips.push((critDelta > 0 ? '+' : '') + critDelta + ' CRIT с прошлого прогона');
+    if (scoreDelta != null) chips.push((scoreDelta > 0 ? '+' : '') + scoreDelta + ' к среднему Score');
+  } else chips.push('Базовый прогон: тренд появится после следующего запуска');
+  chips.push((R.diffChanges || []).length + ' изменений в формах');
+  $('runDelta').innerHTML = chips.slice(0, 3).map(function (text) { return '<span class="delta-chip">' + esc(text) + '</span>'; }).join('');
 }
 
 var TABS = [
@@ -69,12 +92,32 @@ var TABS = [
   { id: 'history', label: 'История' }
 ];
 
+var DUPLICATE_LABELS = {
+  full_duplicate: 'полный дубль', redirect_only: 'только другой редирект',
+  field_variant: 'одинаковые поля, другие настройки', near_duplicate: 'почти-дубль (поля)'
+};
+function duplicatePreview(cluster) {
+  var rows = (cluster.diffMatrix || []).slice(0, 5).map(function (row) {
+    return row.label + ': ' + cluster.ids.map(function (id) { return '#' + id + '=' + row.values[id]; }).join(' / ');
+  });
+  return rows.length ? rows.join('\n') : 'Все анализируемые поля и настройки совпадают';
+}
+function duplicateButton(index, compact) {
+  var cluster = R.clusters[index], title = duplicatePreview(cluster);
+  return '<button class="secondary duplicate-open' + (compact ? ' duplicate-badge' : '') + '" data-cluster="' + index +
+    '" title="' + esc(title) + '" aria-label="Открыть сравнение кластера из ' + cluster.size + ' форм">🧬 ×' + cluster.size + '</button>';
+}
+function formIdCell(row) {
+  var index = clusterByForm[row.id];
+  return html(esc(row.id) + (index == null ? '' : duplicateButton(index, true)), row.id);
+}
+
 // определения колонок для каждой вкладки: [заголовок, функция -> значение]
 function tableDef(tab) {
   var rows = R.rows;
   if (tab === 'forms') return {
     cols: ['Sev', 'Score', 'ID', 'Имя', 'Язык', 'Регион', 'Тип', 'Консент', 'Подписка', 'Email', 'VisitorID', 'Captcha', 'Редирект', 'CRIT', 'WARN', 'Рекомендации'],
-    data: rows.map(function (r) { return { id: r.id, sev: r.severity, cells: [r.severity, r.score, r.id, r.name, r.language, r.region, r.formType, r.consentVersion, r.subscriptionVersion, r.hasEmail, r.hasVisitorId, r.captcha, r.redirect, r.crit, r.warn, r.recommendations] }; })
+    data: rows.map(function (r) { return { id: r.id, sev: r.severity, cells: [html('<span class="sev-chip">' + esc(r.severity) + '</span>', r.severity), r.score, formIdCell(r), r.name, r.language, r.region, r.formType, r.consentVersion, r.subscriptionVersion, r.hasEmail, r.hasVisitorId, r.captcha, r.redirect, r.crit, r.warn, r.recommendations] }; })
   };
   if (tab === 'problems') return {
     cols: ['Sev', 'Score', 'ID', 'Имя', 'Язык', 'CRIT', 'WARN', 'Рекомендации'],
@@ -85,27 +128,28 @@ function tableDef(tab) {
     data: rows.filter(function (r) { return r.redirectIssue; }).map(function (r) { return { sev: r.severity, cells: [r.id, r.name, r.language, r.redirect, r.redirectIssue] }; })
   };
   if (tab === 'preset') return {
-    cols: ['ID', 'Поле', 'Значение', 'Проблема'],
-    data: R.presetIssuesAll.map(function (p) { return { sev: 'CRIT', cells: [p.id, p.field, p.value, p.issue] }; })
+    cols: ['ID', 'Поле', 'Значение', 'Проблема', 'Действие'],
+    data: R.presetIssuesAll.map(function (p) {
+      return { sev: 'CRIT', cells: [p.id, p.field, p.value, p.issue, html('<button class="secondary preset-fix" data-field="' + esc(p.field) + '">Подготовить bulk-правку</button>', p.decision)] };
+    })
   };
   if (tab === 'dupes') return {
-    cols: ['Язык', 'Форм', 'Категория', 'Различия', 'ID форм'],
-    data: R.clusters.map(function (c) {
-      var labels = { full_duplicate: 'полный дубль', redirect_only: 'только другой редирект', field_variant: 'другие настройки', near_duplicate: 'почти-дубль' };
-      return { sev: 'INFO', cells: [c.lang, c.size, labels[c.category] || (c.exact ? 'точный' : 'почти'), c.differences || '', c.ids.join(', ')] };
+    cols: ['Сравнить', 'Язык', 'Форм', 'Категория', 'Различия', 'ID форм'],
+    data: R.clusters.map(function (c, index) {
+      return { sev: 'INFO', cells: [html(duplicateButton(index, false), 'сравнить'), c.lang, c.size, DUPLICATE_LABELS[c.category] || 'дубль', c.differences || '', c.ids.join(', ')] };
     })
   };
   if (tab === 'anomalies') return {
-    cols: ['Поле', 'В формах', 'Проблема'],
-    data: R.anomalies.map(function (a) { return { sev: 'WARN', cells: [a.field, a.count, a.flags] }; })
+    cols: ['Поле', 'В формах', 'Проблема', 'Решение'],
+    data: R.anomalies.map(function (a) { return { sev: 'WARN', cells: [a.field, a.count, a.flags, a.decision || 'Ручная проверка'] }; })
   };
   if (tab === 'consistency') return {
     cols: ['Тип формы', 'Поле', 'Присутствует', 'Обязательное', 'Замечание'],
     data: R.consistency.map(function (c) { return { sev: 'WARN', cells: [c.formType, c.field, c.present, c.required, c.note] }; })
   };
   if (tab === 'agreements') return {
-    cols: ['Agreement ID', 'Name', 'Вариантов текста', 'Форм'],
-    data: R.agrConflicts.map(function (c) { return { sev: 'CRIT', cells: [c.id, c.name, c.variants, c.forms] }; })
+    cols: ['Agreement ID', 'Name', 'Вариантов текста', 'Форм', 'Действие'],
+    data: R.agrConflicts.map(function (c) { return { sev: 'CRIT', cells: [c.id, c.name, c.variants, c.forms, html('<button class="agreement-edit" data-agreement="' + esc(c.id) + '">Унифицировать текст</button>', 'bulk edit')] }; })
   };
   if (tab === 'consent') return {
     cols: ['Язык', 'Ожидаемый', 'Фактический', 'Статус', 'ID'],
@@ -120,6 +164,61 @@ function tableDef(tab) {
     data: (R.timelineRows || []).map(function (t) { return { sev: 'INFO', cells: t }; })
   };
   return { cols: [], data: [] };
+}
+
+function openDuplicate(index) {
+  var cluster = R.clusters[index];
+  if (!cluster) return;
+  $('duplicateDialogTitle').textContent = DUPLICATE_LABELS[cluster.category] || 'Сравнение дублей';
+  $('duplicateDialogMeta').textContent = cluster.size + ' форм · ' + cluster.ids.map(function (id) {
+    return '#' + id + ' ' + (rowById[id] || {}).name;
+  }).join(' · ');
+  var matrix = cluster.diffMatrix || [];
+  if (!matrix.length) {
+    $('duplicateMatrix').innerHTML = '<div class="empty-state">Все анализируемые поля и настройки совпадают. Это кандидат на схлопывание.</div>';
+  } else {
+    $('duplicateMatrix').innerHTML = '<table><thead><tr><th>Поле / атрибут</th>' + cluster.ids.map(function (id) {
+      return '<th>#' + esc(id) + '</th>';
+    }).join('') + '</tr></thead><tbody>' + matrix.map(function (row) {
+      return '<tr><th>' + esc(row.label) + '</th>' + cluster.ids.map(function (id) {
+        return '<td class="diff-cell">' + esc(row.values[id] == null ? '—' : row.values[id]) + '</td>';
+      }).join('') + '</tr>';
+    }).join('') + '</tbody></table>';
+  }
+  var dialog = $('duplicateDialog');
+  if (dialog.showModal) dialog.showModal(); else dialog.setAttribute('open', '');
+}
+
+function openAgreement(id) {
+  var conflict = (R.agrConflicts || []).find(function (item) { return String(item.id) === String(id); });
+  if (!conflict || !Array.isArray(conflict.textVariants)) {
+    toast('Перезапустите анализ, чтобы загрузить варианты текста соглашения'); return;
+  }
+  activeAgreement = conflict;
+  selected = {}; conflict.formIds.forEach(function (formId) { selected[formId] = true; });
+  updateSelection(); renderTable();
+  $('agreementTitle').textContent = 'Agreement ' + conflict.id + ' · ' + conflict.name;
+  $('agreementVariant').innerHTML = '';
+  conflict.textVariants.forEach(function (variant, index) {
+    var option = document.createElement('option'); option.value = String(index);
+    option.textContent = variant.count + ' форм · ' + (variant.text || '(пусто)').slice(0, 120);
+    $('agreementVariant').appendChild(option);
+  });
+  $('agreementText').value = conflict.textVariants[0].text;
+  $('agreementImpact').textContent = 'Будет проверено и изменено до ' + conflict.formIds.length + ' форм';
+  $('agreementEditor').className = 'agreement-editor show';
+  $('agreementEditor').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function preparePreset(field) {
+  selected = {};
+  (R.presetIssuesAll || []).filter(function (issue) { return issue.field === field; }).forEach(function (issue) {
+    selected[issue.id] = true;
+  });
+  $('editKind').value = 'preset'; $('editField').value = field; $('editValue').value = '';
+  updateEditor(); updateSelection(); renderTable();
+  $('controlTitle').scrollIntoView({ behavior: 'smooth' });
+  toast('Выбраны формы с невалидным ' + field + ' — введите каноническое значение');
 }
 
 function renderPager(total) {
@@ -142,7 +241,7 @@ function renderTable() {
   var q = ($('q').value || '').toLowerCase(), s = $('sev').value;
   var filtered = def.data.filter(function (row) {
     var okS = !s || row.sev === s;
-    var okQ = !q || row.cells.join(' ').toLowerCase().indexOf(q) > -1;
+    var okQ = !q || row.cells.map(cellText).join(' ').toLowerCase().indexOf(q) > -1;
     return okS && okQ;
   });
   lastFiltered = selectable ? filtered : [];
@@ -152,7 +251,7 @@ function renderTable() {
   var visibleRows = filtered.slice((page - 1) * pageSize, page * pageSize);
   tbody.innerHTML = visibleRows.map(function (row) {
     var checkbox = selectable ? '<td><input type="checkbox" data-form-id="' + esc(row.id) + '"' + (selected[row.id] ? ' checked' : '') + '></td>' : '';
-    return '<tr style="background:' + (sevColor[row.sev] || '#111c2f') + '">' + checkbox + row.cells.map(function (v) { return '<td class="long">' + esc(v) + '</td>'; }).join('') + '</tr>';
+    return '<tr class="sev-row sev-' + esc(row.sev) + '">' + checkbox + row.cells.map(function (v) { return '<td class="long">' + cellHtml(v) + '</td>'; }).join('') + '</tr>';
   }).join('');
 
   [].forEach.call(tbody.querySelectorAll('[data-form-id]'), function (box) {
@@ -161,6 +260,15 @@ function renderTable() {
       else delete selected[box.getAttribute('data-form-id')];
       updateSelection();
     };
+  });
+  [].forEach.call(tbody.querySelectorAll('.duplicate-open'), function (button) {
+    button.onclick = function () { openDuplicate(parseInt(button.getAttribute('data-cluster'))); };
+  });
+  [].forEach.call(tbody.querySelectorAll('.agreement-edit'), function (button) {
+    button.onclick = function () { openAgreement(button.getAttribute('data-agreement')); };
+  });
+  [].forEach.call(tbody.querySelectorAll('.preset-fix'), function (button) {
+    button.onclick = function () { preparePreset(button.getAttribute('data-field')); };
   });
 
   // сортировка по клику
@@ -185,20 +293,42 @@ function renderTable() {
 function renderTabs() {
   $('tabs').innerHTML = TABS.map(function (t) {
     var count = tableDef(t.id).data.length;
-    return '<div class="tab' + (t.id === currentTab ? ' active' : '') + '" data-tab="' + t.id + '">' + esc(t.label) + ' <b>' + count + '</b></div>';
+    return '<button class="tab' + (t.id === currentTab ? ' active' : '') + '" data-tab="' + t.id + '" aria-selected="' + (t.id === currentTab) + '">' + esc(t.label) + ' <b>' + count + '</b></button>';
   }).join('');
   [].forEach.call($('tabs').children, function (el) {
-    el.onclick = function () { currentTab = el.getAttribute('data-tab'); page = 1; renderTabs(); renderTable(); };
+    el.onclick = function () { currentTab = el.getAttribute('data-tab'); page = 1; renderTabs(); renderReasonGroups(); renderTable(); };
+  });
+}
+
+function renderReasonGroups() {
+  if (!R || currentTab !== 'problems') { $('reasonGroups').className = 'reason-groups'; return; }
+  var counts = {};
+  R.rows.forEach(function (row) {
+    [row.crit, row.warn].filter(Boolean).forEach(function (text) {
+      text.split(' ; ').forEach(function (reason) { counts[reason] = (counts[reason] || 0) + 1; });
+    });
+  });
+  var reasons = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).slice(0, 8);
+  $('reasonGroups').className = reasons.length ? 'reason-groups show' : 'reason-groups';
+  $('reasonGroups').innerHTML = reasons.map(function (reason) {
+    return '<button class="secondary reason-filter" data-reason="' + esc(reason) + '" title="Показать формы">' + esc(reason) + ' · ' + counts[reason] + '</button>';
+  }).join('');
+  [].forEach.call($('reasonGroups').querySelectorAll('.reason-filter'), function (button) {
+    button.onclick = function () { $('q').value = button.getAttribute('data-reason'); page = 1; renderTable(); };
   });
 }
 
 function render() {
-  var validIds = {};
-  R.rows.forEach(function (row) { validIds[row.id] = true; });
+  var validIds = {}; rowById = {}; clusterByForm = {};
+  R.rows.forEach(function (row) { validIds[row.id] = true; rowById[row.id] = row; });
+  (R.clusters || []).forEach(function (cluster, index) {
+    cluster.ids.forEach(function (id) { clusterByForm[id] = index; });
+  });
   Object.keys(selected).forEach(function (id) { if (!validIds[id]) delete selected[id]; });
   $('meta').textContent = 'Профиль: ' + R.profile + ' · ' + new Date(R.generatedAt).toLocaleString('ru-RU') +
     ' · форм: ' + R.rows.length + ' · ср. Score: ' + R.avgScore +
     ' · ' + R.perfStats.totalSec + 'с · cache-hit ' + R.perfStats.cacheHitPct + '%';
+  renderRunDelta();
 
   var s = R.sevCount;
   $('stats').innerHTML =
@@ -211,16 +341,17 @@ function render() {
     '<div class="card"><b>' + R.rows.filter(function (r) { return r.redirectIssue; }).length + '</b>Проблем редиректов</div>' +
     '<div class="card"><b>' + (R.diffChanges ? R.diffChanges.length : 0) + '</b>Изменений с прошлого раза</div>';
 
-  var langDist = distrib(R.rows, 'language').slice(0, 12);
+  var langDist = distrib(R.rows, 'language');
   var topFields = Object.keys(R.fieldUsage).sort(function (a, b) { return R.fieldUsage[b] - R.fieldUsage[a]; }).slice(0, 10).map(function (n) { return [n.replace('CONTACT_', ''), R.fieldUsage[n]]; });
   var entDist = distrib(R.rows, 'entity');
   $('charts').innerHTML =
-    '<div class="chart"><h3>Severity</h3>' + donutSVG([['CRIT', s.CRIT], ['WARN', s.WARN], ['INFO', s.INFO], ['OK', s.OK]], ['#c0392b', '#e0a800', '#2b6cb0', '#1F6F5C']) + '</div>' +
-    '<div class="chart"><h3>Формы по языкам</h3>' + barSVG(langDist, '#1F6F5C') + '</div>' +
-    '<div class="chart"><h3>Топ полей</h3>' + barSVG(topFields, '#2b6cb0') + '</div>' +
-    '<div class="chart"><h3>Сущности</h3>' + donutSVG(entDist, ['#1F6F5C', '#e0a800', '#c0392b']) + '</div>';
+    '<div class="chart"><h3>Severity</h3>' + donutChart([['CRIT', s.CRIT], ['WARN', s.WARN], ['INFO', s.INFO], ['OK', s.OK]], ['#fb7185', '#fbbf24', '#60a5fa', '#10b981']) + '</div>' +
+    '<div class="chart"><h3>Формы по языкам</h3>' + barChart(langDist, '#10b981') + '</div>' +
+    '<div class="chart"><h3>Топ полей</h3>' + barChart(topFields, '#60a5fa') + '</div>' +
+    '<div class="chart"><h3>Сущности</h3>' + donutChart(entDist, ['#10b981', '#fbbf24', '#fb7185']) + '</div>';
 
   renderTabs();
+  renderReasonGroups();
   renderTable();
   updateSelection();
   $('q').oninput = function () { page = 1; renderTable(); };
@@ -240,15 +371,19 @@ function stateLabel(values) {
 
 function renderCommonQuestions() {
   if (!R) return;
+  var threshold = parseInt($('commonThreshold').value) || 80;
+  $('commonThresholdValue').textContent = threshold + '%';
   var rows = R.rows.filter(function (row) { return selected[row.id]; });
-  if (!rows.length) { $('commonQuestions').textContent = 'Выберите формы, чтобы увидеть общие вопросы.'; return; }
+  if (!rows.length) {
+    $('commonImpact').textContent = '';
+    $('commonQuestions').textContent = 'Выберите формы, чтобы увидеть общие вопросы.'; return;
+  }
   if (rows.some(function (row) { return !Array.isArray(row.questions); })) {
     $('commonQuestions').textContent = 'Запустите полный анализ после обновления BFA, чтобы загрузить названия вопросов.';
     return;
   }
 
-  var common = {}, threshold = parseInt($('commonThreshold').value) || 80;
-  $('commonThresholdValue').textContent = threshold + '%';
+  var common = {};
   rows.forEach(function (row) {
     var seen = {};
     row.questions.forEach(function (question) {
@@ -267,9 +402,13 @@ function renderCommonQuestions() {
   });
   questions.sort(function (a, b) { return a.labels[0].localeCompare(b.labels[0], 'ru'); });
   if (!questions.length) {
+    $('commonImpact').textContent = '0 вопросов · минимум ' + Math.ceil(rows.length * threshold / 100) + ' из ' + rows.length + ' форм';
     $('commonQuestions').textContent = 'Даже с порогом ' + threshold + '% нет общих полей. Вероятно, выбраны формы разных типов — сузьте фильтр или тип формы.';
     return;
   }
+  var coverage = questions.map(function (question) { return question.formIds.length; });
+  $('commonImpact').textContent = questions.length + ' вопросов · каждая правка затронет от ' +
+    Math.min.apply(null, coverage) + ' до ' + Math.max.apply(null, coverage) + ' из ' + rows.length + ' форм';
 
   $('commonQuestions').innerHTML = '<table><thead><tr><th>Вопрос</th><th>Технический ключ</th><th>Охват</th><th>Исключения</th><th>Обяз.</th><th>Виден</th><th>Новое название</th><th>Обяз.</th><th>Виден</th><th></th></tr></thead><tbody>' +
     questions.map(function (question) {
@@ -289,7 +428,7 @@ function renderCommonQuestions() {
         esc(original) + '" value="' + esc(original) + '" placeholder="Введите единое название"></td>' +
         '<td data-label="Новая обязательность"><select class="question-required"><option value="keep">Не менять</option><option value="true">Да</option><option value="false">Нет</option></select></td>' +
         '<td data-label="Новая видимость"><select class="question-visible"><option value="keep">Не менять</option><option value="true">Да</option><option value="false">Нет</option></select></td>' +
-        '<td data-label="Проверка"><button class="question-preview">Preview</button></td></tr>';
+        '<td data-label="Проверка"><button class="question-preview">Preview · ' + question.formIds.length + ' форм</button></td></tr>';
     }).join('') + '</tbody></table>';
 
   [].forEach.call($('commonQuestions').querySelectorAll('.question-preview'), function (button) {
@@ -321,7 +460,10 @@ function renderCommonQuestions() {
   });
 }
 
-$('commonThreshold').oninput = renderCommonQuestions;
+$('commonThreshold').oninput = function () {
+  chrome.storage.local.set({ commonThreshold: parseInt(this.value) });
+  renderCommonQuestions();
+};
 
 function updateSelection() {
   $('selection').textContent = 'Выбрано: ' + Object.keys(selected).length;
@@ -382,6 +524,21 @@ function loadAudit() {
 }
 
 $('editKind').onchange = updateEditor;
+$('closeDuplicate').onclick = function () { $('duplicateDialog').close(); };
+$('closeAgreement').onclick = function () {
+  activeAgreement = null; $('agreementEditor').className = 'agreement-editor';
+};
+$('agreementVariant').onchange = function () {
+  if (activeAgreement) $('agreementText').value = activeAgreement.textVariants[parseInt(this.value)].text;
+};
+$('previewAgreement').onclick = function () {
+  if (!activeAgreement) return;
+  var text = $('agreementText').value.trim();
+  if (!text) { toast('Введите канонический текст соглашения'); return; }
+  requestPreview(activeAgreement.formIds.map(function (formId) {
+    return { formId: formId, kind: 'agreement', field: String(activeAgreement.id), value: text };
+  }));
+};
 $('selectAll').onclick = function () {
   R.rows.forEach(function (row) { selected[row.id] = true; });
   updateSelection(); renderTable();
@@ -431,12 +588,27 @@ updateEditor();
 loadAudit();
 
 function load() {
-  chrome.storage.local.get('lastResult', function (d) {
+  chrome.storage.local.get(['lastResult', 'commonThreshold'], function (d) {
+    if (d.commonThreshold >= 50 && d.commonThreshold <= 100) $('commonThreshold').value = d.commonThreshold;
     if (d.lastResult && d.lastResult.rows) { R = d.lastResult; render(); return; }
     $('loading').style.display = 'none'; $('empty').style.display = 'block';
   });
 }
 load();
+
+document.addEventListener('keydown', function (event) {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+    event.preventDefault(); $('q').focus(); $('q').select(); return;
+  }
+  if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && $('tabs').contains(document.activeElement)) {
+    event.preventDefault();
+    var tabs = [].slice.call($('tabs').querySelectorAll('.tab'));
+    var index = tabs.indexOf(document.activeElement) + (event.key === 'ArrowRight' ? 1 : -1);
+    var target = tabs[(index + tabs.length) % tabs.length].getAttribute('data-tab');
+    tabs[(index + tabs.length) % tabs.length].click();
+    $('tabs').querySelector('[data-tab="' + target + '"]').focus();
+  }
+});
 
 // живое обновление после нового прогона
 chrome.runtime.onMessage.addListener(function (msg) {

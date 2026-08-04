@@ -5,7 +5,7 @@
    опциональный вебхук по CRIT. Прогресс шлётся в popup/report.
    ============================================================ */
 import { createApi, runPool, sleep } from './api.js';
-import { openDb, cacheGet, cacheSet, cacheKeys, cacheDelete, deleteDb, hashObj, HIST, META } from './cache.js';
+import { openDb, cacheGet, cacheSet, cacheKeys, cacheDelete, deleteDb, hashObj, cacheNamespace, HIST, META } from './cache.js';
 import { DEFAULT_PROFILES } from './rules.js';
 import { acceptsCrmUrl, crmScope } from './scope.js';
 import { shouldExcludeForm } from './filter.js';
@@ -263,6 +263,7 @@ async function applyEdits(planId, confirmation) {
     if (confirmation !== plan.confirmation) throw new Error('Неверная строка подтверждения');
 
     var settings = await getSettings();
+    var namespace = cacheNamespace(settings.profileName);
     if (settings.profileName !== plan.profileName) throw new Error('Профиль изменился после preview');
     var tab = await findCrmTab(plan.profileName);
     if (!tab) throw new Error('Откройте ' + crmScope(plan.profileName).expectedUrl);
@@ -295,7 +296,7 @@ async function applyEdits(planId, confirmation) {
           });
           if (actual !== change.after) throw new Error('Проверка после сохранения не пройдена');
         });
-        await cacheSet(db, entry.id, verified);
+        await cacheSet(db, namespace.formPrefix + entry.id, verified);
         results.push({
           id: entry.id, status: 'applied',
           changes: entry.changes.map(auditChange)
@@ -328,6 +329,7 @@ async function run(force) {
   var tStart = Date.now();
   try {
     var S = await getSettings();
+    var namespace = cacheNamespace(S.profileName);
     broadcast({ type: 'status', phase: 'init', text: 'Ищу вкладку Bitrix24...' });
 
     var tab = await findCrmTab(S.profileName);
@@ -373,7 +375,11 @@ async function run(force) {
 
     async function fetchForm(id) {
       if (S.useCache && S.incremental && db && !force) {
-        var cached = await cacheGet(db, id);
+        var cached = await cacheGet(db, namespace.formPrefix + id);
+        if (!cached && S.profileName === 'Default') {
+          cached = await cacheGet(db, id);
+          if (cached) await cacheSet(db, namespace.formPrefix + id, cached);
+        }
         if (cached) { raw[id] = cached; perf.cacheHits++; return; }
       }
       var ts = Date.now();
@@ -381,7 +387,7 @@ async function run(force) {
       perf.formTimes.push(Date.now() - ts);
       if (!resp || resp.status !== 'success' || !resp.data || !resp.data.data) { fails.push(id); perf.errors++; return; }
       raw[id] = resp.data;
-      if (S.useCache && db) await cacheSet(db, id, resp.data);
+      if (S.useCache && db) await cacheSet(db, namespace.formPrefix + id, resp.data);
     }
 
     await runPool(ids, S.concurrency, fetchForm, function (done, total) {
@@ -415,8 +421,9 @@ async function run(force) {
     // 5) дифф + история
     var diffChanges = [], timelineRows = [], historyStats = [];
     if (S.useCache && db) {
-      var SNAP_KEY = '__snapshot__', SNAP_VER = 'v5';
+      var SNAP_KEY = namespace.snapshot, SNAP_VER = 'v5';
       var prevWrap = await cacheGet(db, SNAP_KEY, META);
+      if (!prevWrap && S.profileName === 'Default') prevWrap = await cacheGet(db, '__snapshot__', META);
       var curSnap = buildSnapshot(A.rows);
       var prevSnap = (prevWrap && prevWrap.ver === SNAP_VER) ? prevWrap.data : null;
       diffChanges = diffSnapshots(prevSnap, curSnap);
@@ -424,14 +431,21 @@ async function run(force) {
 
       var stamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
       var lightSnap = {}; A.rows.forEach(function (r) { lightSnap[r.id] = { s: r.severity, cv: r.consentVersion, q: r.score }; });
-      await cacheSet(db, stamp, lightSnap, HIST);
+      await cacheSet(db, namespace.historyPrefix + stamp, lightSnap, HIST);
 
-      var histKeys = (await cacheKeys(db, HIST)).sort();
+      function historyStamp(key) {
+        return String(key).indexOf(namespace.historyPrefix) === 0 ?
+          String(key).slice(namespace.historyPrefix.length) : String(key);
+      }
+      var histKeys = (await cacheKeys(db, HIST)).filter(function (key) {
+        return String(key).indexOf(namespace.historyPrefix) === 0 ||
+          (S.profileName === 'Default' && /^\d{4}-/.test(String(key)));
+      }).sort(function (a, b) { return historyStamp(a).localeCompare(historyStamp(b)); });
       while (histKeys.length > 30) await cacheDelete(db, histKeys.shift(), HIST);
       var histData = {};
       for (var hi = 0; hi < histKeys.length; hi++) histData[histKeys[hi]] = await cacheGet(db, histKeys[hi], HIST);
       historyStats = histKeys.map(function (key) {
-        var stats = { at: key, CRIT: 0, WARN: 0, INFO: 0, OK: 0, avgScore: null }, scores = [];
+        var stats = { at: historyStamp(key), CRIT: 0, WARN: 0, INFO: 0, OK: 0, avgScore: null }, scores = [];
         Object.keys(histData[key] || {}).forEach(function (id) {
           var item = histData[key][id]; stats[item.s] = (stats[item.s] || 0) + 1;
           if (typeof item.q === 'number') scores.push(item.q);
@@ -443,7 +457,9 @@ async function run(force) {
         var allFormIds = {}; histKeys.forEach(function (k) { Object.keys(histData[k] || {}).forEach(function (id) { allFormIds[id] = 1; }); });
         Object.keys(allFormIds).forEach(function (id) {
           var seq = histKeys.map(function (k) { var v = (histData[k] || {})[id]; return v ? v.s + '/' + (v.cv || '—') : '—'; });
-          if (new Set(seq).size > 1) timelineRows.push([id, histKeys.map(function (k, i) { return k.slice(5, 16) + ': ' + seq[i]; }).join('  ->  ')]);
+          if (new Set(seq).size > 1) timelineRows.push([id, histKeys.map(function (k, i) {
+            return historyStamp(k).slice(5, 16) + ': ' + seq[i];
+          }).join('  ->  ')]);
         });
       }
     }

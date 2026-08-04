@@ -1,4 +1,4 @@
-var KINDS = ['name', 'title', 'buttonCaption', 'successUrl', 'preset', 'label', 'required', 'visible'];
+var KINDS = ['name', 'title', 'buttonCaption', 'successUrl', 'preset', 'label', 'required', 'visible', 'agreement'];
 
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 
@@ -20,6 +20,13 @@ function target(options, operation) {
     if (!preset) throw new Error('Preset-поле ' + operation.field + ' отсутствует');
     return { object: preset, key: 'value' };
   }
+  if (operation.kind === 'agreement') {
+    var agreement = ((options.data || {}).agreements || []).find(function (item) {
+      return String(item.id) === operation.field;
+    });
+    if (!agreement) throw new Error('Соглашение ' + operation.field + ' отсутствует');
+    return { object: agreement, key: 'label' };
+  }
   var field = ((options.data || {}).fields || []).find(function (item) {
     return item.name === operation.field;
   });
@@ -39,6 +46,7 @@ export function normalizeOperation(operation) {
   if (out.kind === 'preset' && !/^[A-Z0-9_]+$/.test(out.field)) {
     throw new Error('Некорректное имя preset-поля');
   }
+  if (out.kind === 'agreement' && !/^\d+$/.test(out.field)) throw new Error('Некорректный Agreement ID');
   if ((out.kind === 'label' || out.kind === 'required' || out.kind === 'visible') && !out.field) {
     throw new Error('Укажите поле формы');
   }
@@ -46,9 +54,10 @@ export function normalizeOperation(operation) {
     if (out.value !== true && out.value !== false) throw new Error('Значение должно быть true или false');
   } else {
     out.value = String(out.value == null ? '' : out.value).trim();
-    if (out.value.length > 2000) throw new Error('Значение слишком длинное');
-    if ((out.kind === 'name' || out.kind === 'label') && !out.value) {
-      throw new Error(out.kind === 'name' ? 'Имя формы не может быть пустым' : 'Текст вопроса не может быть пустым');
+    if (out.value.length > (out.kind === 'agreement' ? 50000 : 2000)) throw new Error('Значение слишком длинное');
+    if ((out.kind === 'name' || out.kind === 'label' || out.kind === 'agreement') && !out.value) {
+      if (out.kind === 'name') throw new Error('Имя формы не может быть пустым');
+      throw new Error(out.kind === 'agreement' ? 'Текст соглашения не может быть пустым' : 'Текст вопроса не может быть пустым');
     }
     if (out.kind === 'successUrl' && out.value) {
       var url;
@@ -75,7 +84,7 @@ export function applyEdit(options, operation) {
 }
 
 export function editRisk(operation) {
-  if (operation.kind === 'visible' || operation.kind === 'required') return 'HIGH';
+  if (operation.kind === 'visible' || operation.kind === 'required' || operation.kind === 'agreement') return 'HIGH';
   if (operation.kind === 'successUrl' || operation.kind === 'preset') return 'MEDIUM';
   return 'LOW';
 }
