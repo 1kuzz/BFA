@@ -21,11 +21,16 @@ sync, region-specific rule profiles, run history, and optional alerting.
   fields, required-field consistency across form types, agreement conflicts
   (same agreement ID with different text across forms), a consent map by
   language
+- **Interactive duplicate diff** — field/settings matrix with concrete values,
+  keyboard/touch-friendly dialogs, and duplicate badges in the form inventory
+- **Agreement governance** — choose or enter canonical Agreement text and apply
+  it through the existing preview, approval, readback, and rollback flow
 - **History & diff** — every run is compared against the previous snapshot
-  (IndexedDB), with a per-form timeline of severity/consent changes
+  (profile-isolated IndexedDB), with a per-form timeline of severity/consent changes
 - **Exports**: `Forms_Analysis.xlsx` (18+ sheets), `forms_analysis.jsonl`
   (for BI ingestion), `forms_raw.json`
-- **Live dashboard** — trend sparklines, paginated tables, filters, sorting, print-to-PDF
+- **Live dashboard** — labeled charts, neutral severity rows, run deltas,
+  paginated tables, grouped reasons, keyboard navigation, and print-to-PDF
 - **Optional webhook** (Slack/Jira-compatible) summarizing CRIT findings
 - **Scheduled runs** via `chrome.alarms`
 

@@ -22,6 +22,60 @@ function jaccard(a, b) {
   return uni ? cnt / uni : 1;
 }
 
+var DUP_SETTINGS = [
+  ['redirect', 'Redirect'], ['successText', 'Success text'], ['buttonCaption', 'Текст кнопки'],
+  ['theme', 'Theme'], ['agreementIds', 'Agreement IDs'], ['captcha', 'Captcha'],
+  ['callback', 'Callback'], ['whatsapp', 'WhatsApp'], ['integration', 'Integration'],
+  ['payment', 'Payment'], ['entity', 'Сущность'], ['requiredFields', 'Обязательные поля'],
+  ['presetSignature', 'Preset'], ['dedupe', 'Dedupe'], ['responsible', 'Ответственный']
+];
+
+function different(values) {
+  return new Set(Object.keys(values).map(function (id) { return String(values[id]); })).size > 1;
+}
+
+function clusterDiff(ids, rowById) {
+  var matrix = [], fieldCount = {}, questions = {};
+  ids.forEach(function (id) {
+    questions[id] = {};
+    (rowById[id].questions || []).forEach(function (question) {
+      questions[id][question.name] = question;
+    });
+    rowById[id].visibleFields.split(', ').filter(Boolean).forEach(function (name) {
+      fieldCount[name] = (fieldCount[name] || 0) + 1;
+    });
+  });
+  var diffFields = Object.keys(fieldCount).filter(function (name) { return fieldCount[name] !== ids.length; });
+  var allQuestionNames = {};
+  ids.forEach(function (id) { Object.keys(questions[id]).forEach(function (name) { allQuestionNames[name] = true; }); });
+  Object.keys(allQuestionNames).sort().forEach(function (name) {
+    var presence = {}, presentEverywhere = true;
+    ids.forEach(function (id) {
+      presence[id] = questions[id][name] ? 'Да' : '—';
+      if (!questions[id][name]) presentEverywhere = false;
+    });
+    if (different(presence)) matrix.push({ kind: 'field', key: name + ':presence', label: name + ' · присутствует', values: presence, differs: true });
+    if (!presentEverywhere) return;
+    [['label', 'label'], ['required', 'обязательное'], ['visible', 'видимое']].forEach(function (attr) {
+      var values = {};
+      ids.forEach(function (id) {
+        var value = questions[id][name][attr[0]];
+        values[id] = typeof value === 'boolean' ? (value ? 'Да' : 'Нет') : value;
+      });
+      if (different(values)) matrix.push({ kind: 'field', key: name + ':' + attr[0], label: name + ' · ' + attr[1], values: values, differs: true });
+    });
+  });
+  DUP_SETTINGS.forEach(function (setting) {
+    var values = {};
+    ids.forEach(function (id) {
+      var value = rowById[id][setting[0]];
+      values[id] = value === '' || value == null ? '—' : value;
+    });
+    if (different(values)) matrix.push({ kind: 'setting', key: setting[0], label: setting[1], values: values, differs: true });
+  });
+  return { diffFields: diffFields.sort(), matrix: matrix };
+}
+
 export function analyze(raw, RULES, presetRules, dupThreshold) {
   var DUP_TH = dupThreshold || 0.9;
   var validatePreset = makeValidator(presetRules);
@@ -53,7 +107,10 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
       presetAll[p.fieldName] = (presetAll[p.fieldName] || 0) + 1;
       var v = validatePreset(p.fieldName, clean(p.value));
       if (v) {
-        var issue = { id: id, field: p.fieldName, value: clean(p.value), issue: v };
+        var issue = {
+          id: id, field: p.fieldName, value: clean(p.value), issue: v,
+          actionable: true, decision: 'Можно исправить существующее preset-поле через approval-flow'
+        };
         presetIssues.push(issue); presetIssuesAll.push(issue);
       }
     });
@@ -61,9 +118,10 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
     var res = top.result || {}, succ = res.success || {};
     (d.agreements || []).forEach(function (a) {
       var aid = String(a.id);
-      if (!agreements[aid]) agreements[aid] = { name: clean(a.name), texts: {}, forms: [] };
+      if (!agreements[aid]) agreements[aid] = { name: clean(a.name), texts: {}, textForms: {}, forms: [] };
       var txt = clean(a.label);
       agreements[aid].texts[txt] = (agreements[aid].texts[txt] || 0) + 1;
+      (agreements[aid].textForms[txt] = agreements[aid].textForms[txt] || []).push(id);
       agreements[aid].forms.push(id);
     });
 
@@ -125,7 +183,12 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
     var agreement = agreements[aid], txts = Object.keys(agreement.texts);
     if (txts.length < 2) return;
     var formIds = Array.from(new Set(agreement.forms));
-    var conflict = { id: aid, name: agreement.name, variants: txts.length, forms: formIds.length, formIds: formIds };
+    var conflict = {
+      id: aid, name: agreement.name, variants: txts.length, forms: formIds.length, formIds: formIds,
+      textVariants: txts.map(function (text) {
+        return { text: text, count: agreement.texts[text], formIds: Array.from(new Set(agreement.textForms[text])) };
+      }).sort(function (a, b) { return b.count - a.count; })
+    };
     agrConflicts.push(conflict);
     conflict.formIds.forEach(function (formId) {
       (conflictsByForm[formId] = conflictsByForm[formId] || []).push(conflict);
@@ -171,30 +234,27 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
         }
       });
       if (cl.length > 1) {
-        var exact = new Set(cl.map(function (i) { return rowById[i].visibleFields; })).size === 1;
-        var category = 'near_duplicate', differences = 'поля';
+        var exact = new Set(cl.map(function (i) {
+          return rowById[i].visibleFields.split(', ').filter(Boolean).sort().join('\u001f');
+        })).size === 1;
+        var diff = clusterDiff(cl, rowById);
+        var category = 'near_duplicate', differences = diff.diffFields.join(', ') || 'поля';
         if (exact) {
-          var settingsKeys = ['successText', 'buttonCaption', 'theme', 'captcha', 'callback', 'whatsapp',
-            'integration', 'payment', 'entity', 'requiredFields', 'presetSignature', 'agreementIds', 'dedupe', 'responsible'];
-          var redirects = new Set(cl.map(function (i) { return rowById[i].redirect; }));
-          var settings = new Set(cl.map(function (i) {
-            var r = rowById[i]; return settingsKeys.map(function (key) { return r[key]; }).join('\u001f');
-          }));
-          if (redirects.size === 1 && settings.size === 1) {
+          var settingDiffs = diff.matrix.filter(function (row) { return row.kind === 'setting'; });
+          var fieldDiffs = diff.matrix.filter(function (row) { return row.kind === 'field'; });
+          if (!settingDiffs.length && !fieldDiffs.length) {
             category = 'full_duplicate'; differences = 'нет';
-          } else if (redirects.size > 1 && settings.size === 1) {
+          } else if (!fieldDiffs.length && settingDiffs.length === 1 && settingDiffs[0].key === 'redirect') {
             category = 'redirect_only'; differences = 'redirect/landing';
           } else {
             category = 'field_variant';
-            var changed = [];
-            if (redirects.size > 1) changed.push('redirect');
-            settingsKeys.forEach(function (key) {
-              if (new Set(cl.map(function (i) { return rowById[i][key]; })).size > 1) changed.push(key);
-            });
-            differences = changed.join(', ');
+            differences = diff.matrix.map(function (row) { return row.label; }).join(', ');
           }
         }
-        clusters.push({ lang: l, size: cl.length, ids: cl, exact: exact, category: category, differences: differences });
+        clusters.push({
+          lang: l, size: cl.length, ids: cl, exact: exact, category: category,
+          differences: differences, diffFields: diff.diffFields, diffMatrix: diff.matrix
+        });
       }
     });
   });
@@ -208,7 +268,10 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
     var mt = n.match(/^(.*?)(\d)$/);
     if (mt && fieldUsage[mt[1]]) flags.push('опечатка/дубль базового ' + mt[1]);
     if (fieldUsage[n] <= 2) flags.push('редкое (' + fieldUsage[n] + ')');
-    if (flags.length) anomalies.push({ field: n, count: fieldUsage[n], flags: flags.join('; ') });
+    if (flags.length) anomalies.push({
+      field: n, count: fieldUsage[n], flags: flags.join('; '), actionable: false,
+      decision: 'Ручная проверка: переименование меняет CRM-схему и не поддерживается безопасным editor.js'
+    });
   });
   anomalies.sort(function (a, b) { return a.count - b.count; });
 
