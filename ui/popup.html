@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<style>
+  :root { --brand:#1F6F5C; --crit:#c0392b; --warn:#b7791f; --info:#2b6cb0; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; width: 340px; margin: 0; padding: 14px; background: #f5f6f8; color: #222; }
+  h1 { font-size: 15px; margin: 0 0 4px; color: var(--brand); }
+  .sub { font-size: 11px; color: #888; margin-bottom: 12px; }
+  .profile { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 12px; }
+  select { flex: 1; padding: 6px; border: 1px solid #ccc; border-radius: 6px; }
+  button { width: 100%; padding: 10px; border: none; border-radius: 6px; background: var(--brand); color: #fff; font-size: 13px; cursor: pointer; margin-bottom: 6px; }
+  button.ghost { background: #fff; color: var(--brand); border: 1px solid var(--brand); }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 6px; }
+  .row button { margin-bottom: 6px; }
+  .bar { height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; margin: 8px 0 4px; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--brand); transition: width .2s; }
+  #phase { font-size: 12px; min-height: 16px; }
+  #log { font-size: 11px; color: #555; max-height: 90px; overflow: auto; background: #fff; border: 1px solid #eee; border-radius: 6px; padding: 6px; margin-top: 8px; white-space: pre-wrap; }
+  .stats { display: flex; gap: 6px; margin-top: 8px; }
+  .stat { flex: 1; background: #fff; border-radius: 6px; padding: 6px; text-align: center; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .stat b { display: block; font-size: 16px; }
+  .stat.c b { color: var(--crit); } .stat.w b { color: var(--warn); } .stat.i b { color: var(--info); } .stat.o b { color: var(--brand); }
+  .stat span { font-size: 10px; color: #888; }
+  a.link { font-size: 12px; color: var(--brand); text-decoration: none; }
+</style>
+</head>
+<body>
+  <h1>Bitrix24 Forms Analyzer</h1>
+  <div class="sub">v5 — аудит, дифф, скоринг форм</div>
+
+  <div class="profile">
+    <span>Профиль:</span>
+    <select id="profile"></select>
+  </div>
+
+  <button id="run">▶ Запустить анализ</button>
+  <div class="row">
+    <button class="ghost" id="runForce">⟳ Полный (без кэша)</button>
+    <button class="ghost" id="report">📊 Отчёт</button>
+  </div>
+
+  <div class="bar"><i id="fill"></i></div>
+  <div id="phase">Готов к запуску</div>
+
+  <div class="stats" id="stats" style="display:none">
+    <div class="stat c"><b id="sC">0</b><span>CRIT</span></div>
+    <div class="stat w"><b id="sW">0</b><span>WARN</span></div>
+    <div class="stat i"><b id="sI">0</b><span>INFO</span></div>
+    <div class="stat o"><b id="sO">0</b><span>OK</span></div>
+  </div>
+
+  <div id="log"></div>
+  <div style="margin-top:8px;text-align:right"><a class="link" id="opts" href="#">⚙ Настройки и профили</a></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

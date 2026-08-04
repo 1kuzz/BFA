@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Настройки — Forms Analyzer</title>
+<style>
+  :root { --brand:#1F6F5C; }
+  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; max-width: 780px; margin: 24px auto; padding: 0 16px; color: #222; }
+  h1 { color: var(--brand); font-size: 20px; }
+  h2 { font-size: 15px; margin-top: 24px; border-bottom: 1px solid #eee; padding-bottom: 4px; }
+  label { display: block; margin: 10px 0 4px; font-size: 13px; font-weight: 600; }
+  input[type=text], input[type=number], input[type=url], select, textarea { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
+  textarea { min-height: 120px; font-family: monospace; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .col { flex: 1; min-width: 220px; }
+  .check { display: flex; align-items: center; gap: 8px; font-weight: 400; margin: 6px 0; }
+  .check input { width: auto; }
+  button { background: var(--brand); color: #fff; border: none; border-radius: 6px; padding: 9px 16px; cursor: pointer; font-size: 13px; margin-top: 14px; }
+  button.ghost { background: #fff; color: var(--brand); border: 1px solid var(--brand); }
+  .hint { font-size: 12px; color: #888; font-weight: 400; }
+  #saved { color: var(--brand); font-size: 13px; margin-left: 10px; }
+  .profbar { display: flex; gap: 8px; align-items: center; }
+</style>
+</head>
+<body>
+  <h1>Bitrix24 Forms Analyzer — настройки</h1>
+
+  <h2>Профили правил</h2>
+  <div class="profbar">
+    <select id="profileSel" style="max-width:220px"></select>
+    <button class="ghost" id="newProfile">+ Новый</button>
+    <button class="ghost" id="delProfile">Удалить</button>
+    <span class="hint">Регионы (LATAM/META/EMEA/RU) — разные требования.</span>
+  </div>
+
+  <div class="row">
+    <div class="col">
+      <label>Требования профиля</label>
+      <div class="check"><input type="checkbox" id="requireConsentVersion"><span>Требовать версию консента</span></div>
+      <div class="check"><input type="checkbox" id="requireEmail"><span>Требовать поле Email</span></div>
+      <div class="check"><input type="checkbox" id="requireHttpsRedirect"><span>Требовать HTTPS-редирект</span></div>
+      <div class="check"><input type="checkbox" id="requireCaptcha"><span>Требовать captcha</span></div>
+      <div class="check"><input type="checkbox" id="requireVisitorId"><span>Требовать VisitorID</span></div>
+      <div class="check"><input type="checkbox" id="requireMarketoId"><span>Требовать Marketo ID</span></div>
+    </div>
+    <div class="col">
+      <label>Preset-паттерны (JSON: поле → regex)</label>
+      <textarea id="presetRules" spellcheck="false"></textarea>
+      <span class="hint">Значения preset-полей валидируются этими шаблонами.</span>
+    </div>
+  </div>
+
+  <h2>Параметры запуска</h2>
+  <div class="row">
+    <div class="col">
+      <label>Параллельность <span class="hint">(1–10)</span></label>
+      <input type="number" id="concurrency" min="1" max="10">
+      <label>Порог дублей <span class="hint">(0.5–1.0, Jaccard)</span></label>
+      <input type="number" id="dupThreshold" min="0.5" max="1" step="0.05">
+      <label>Макс. ретраев</label>
+      <input type="number" id="maxRetries" min="1" max="15">
+    </div>
+    <div class="col">
+      <div class="check"><input type="checkbox" id="useCache"><span>Использовать кэш IndexedDB</span></div>
+      <div class="check"><input type="checkbox" id="incremental"><span>Инкрементальный режим (пропускать закэшированные)</span></div>
+      <label>Плановый прогон, минут <span class="hint">(0 — выкл.)</span></label>
+      <input type="number" id="scheduleMinutes" min="0" max="1440">
+      <label>Вебхук для CRIT-алертов <span class="hint">(Slack/Jira, необязательно)</span></label>
+      <input type="url" id="webhookUrl" placeholder="https://hooks.slack.com/...">
+    </div>
+  </div>
+
+  <div>
+    <button id="save">Сохранить</button>
+    <button class="ghost" id="reset">Сбросить кэш и историю</button>
+    <span id="saved"></span>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
