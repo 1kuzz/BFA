@@ -25,7 +25,7 @@ sync, region-specific rule profiles, run history, and optional alerting.
   (IndexedDB), with a per-form timeline of severity/consent changes
 - **Exports**: `Forms_Analysis.xlsx` (18+ sheets), `forms_analysis.jsonl`
   (for BI ingestion), `forms_raw.json`
-- **Live dashboard** — charts, tabs, filters, sorting, print-to-PDF
+- **Live dashboard** — trend sparklines, paginated tables, filters, sorting, print-to-PDF
 - **Optional webhook** (Slack/Jira-compatible) summarizing CRIT findings
 - **Scheduled runs** via `chrome.alarms`
 
@@ -35,7 +35,7 @@ The v6 redesign combines 10 operational features in one workflow:
 
 1. **Fleet command center** — dense health KPIs, charts, risk queues, and searchable inventory.
 2. **Bulk scope control** — select individual forms, every filtered row, or the complete form fleet.
-3. **Common-question editor** — intersect selected forms by technical field key, show human-readable question labels, and bulk-edit label, visibility, and required state.
+3. **Common-question editor** — finds fields shared by a configurable majority, exposes outlier forms, and bulk-edits label, visibility, and required state.
 4. **Exact dry-run preview** — fetches fresh forms and shows before/after values before any mutation.
 5. **Risk-aware changes** — every edit is labeled LOW, MEDIUM, or HIGH.
 6. **Explicit approval** — applying requires the generated `APPLY N` confirmation within 15 minutes.
@@ -44,7 +44,7 @@ The v6 redesign combines 10 operational features in one workflow:
 9. **Governance trail** — 100 change runs and rollback backups for the latest 20 runs are retained.
 10. **Policy and evidence** — regional rule profiles, 30-run drift history, XLSX/JSONL/raw exports, and webhook alerts.
 
-Bulk edits are intentionally limited to 100 forms per approved batch. The
+Bulk edits are intentionally limited to 1000 forms per approved batch. The
 extension updates only properties whose structure is present in the freshly
 fetched form; it never invents missing fields or preset definitions.
 
@@ -71,11 +71,12 @@ Built-in profiles:
 
 | Profile | Difference from `Default` |
 |---|---|
-| `Default` | baseline requirements |
-| `LATAM` | requires Marketo ID |
-| `RU` | requires captcha; processes only `kasperskyform.com` |
+| `Default` | EU/Global rules; excludes `la` and region `Americas` by default |
+| `RU` | RU consent versions (`BTX v1`, `RU EULA v1`); processes only `kasperskyform.com` |
 
-Add your own (e.g. `META`, `EMEA`) with different requirements per region.
+Add your own (e.g. `META`, `EMEA`) with explicit requirements, preset regexes,
+and excluded languages/regions. LATAM is excluded before analysis and does not
+enter any aggregate or export.
 
 ## How it works / architecture
 
@@ -86,6 +87,7 @@ core/
   content.js              runs on the Bitrix24 tab; extracts sessid, proxies fetch to ajax.php
   api.js                   retry/backoff + bounded-concurrency worker pool
   cache.js                 IndexedDB (form cache, run history, diff snapshot)
+  filter.js                profile exclusions applied before analysis
   rules.js                 rule profiles, preset validators, severity/score engine
 analyzers/
   analyze.js               per-form scoring, duplicate clustering, anomaly/consistency checks
@@ -95,6 +97,7 @@ ui/
   popup.html / popup.js     toolbar popup: run, profile picker, live progress
   options.html / options.js settings + rule profile editor
   report.html / report.js   standalone dashboard (charts, filters, print)
+  tokens.css                shared visual tokens and interaction states
 vendor/
   xlsx.full.min.js          bundled SheetJS, wrapped as an ES module (no CDN load, avoids CSP issues)
 icons/

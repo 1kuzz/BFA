@@ -4,9 +4,8 @@
 <meta charset="utf-8">
 <title>Forms Report</title>
 <style>
-  :root { --brand:#10b981; --brand2:#0f766e; --ink:#dbeafe; --panel:#111c2f; --line:#2a3952; --crit:#fb7185; --warn:#fbbf24; --info:#60a5fa; }
   * { box-sizing: border-box; }
-  body { font-family: Inter, ui-sans-serif, -apple-system, Segoe UI, Arial, sans-serif; margin: 0; padding: 24px; background: #07111f; color: var(--ink); }
+  body { font-family: Inter, ui-sans-serif, -apple-system, Segoe UI, Arial, sans-serif; margin: 0; padding: 24px; background:var(--bg); color:var(--text); }
   .hero { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:22px 24px; margin-bottom:16px; border:1px solid var(--line); border-radius:16px; background:linear-gradient(120deg,#102238,#0b302d); }
   h1 { color:#fff; font-size:24px; margin:0 0 5px; letter-spacing:-.02em; }
   h2 { margin:0 0 12px; font-size:16px; color:#fff; }
@@ -15,6 +14,8 @@
   .stats { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px; min-width:130px; }
   .card b { font-size: 22px; display: block; }
+  .spark { display:block; width:80px; height:18px; margin-top:8px; }
+  .trend { display:block; color:#7186a3; font-size:9px; margin-top:8px; max-width:120px; }
   .crit b { color: var(--crit); } .warn b { color: var(--warn); } .info b { color: var(--info); } .ok b { color: var(--brand); }
   .charts { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; }
   .chart { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 16px; flex:1; min-width:220px; }
@@ -30,28 +31,37 @@
   .common table { min-width:900px; }
   .common input, .common select { width:100%; min-width:120px; }
   .common code { color:#93c5fd; font-size:11px; }
-  .preview { margin-top:12px; padding:12px; border:1px solid var(--line); border-radius:10px; background:#081421; white-space:pre-wrap; font:12px ui-monospace,monospace; display:none; max-height:260px; overflow:auto; }
+  .preview { margin-top:12px; padding:12px; border:1px solid var(--line); border-radius:10px; background:#081421; white-space:pre-wrap; font:12px ui-monospace,monospace; display:none; max-height:260px; overflow:auto; animation:toast-in .16s ease; }
   .approval { display:none; gap:8px; align-items:center; margin-top:10px; }
-  .approval.show { display:flex; }
+  .approval.show { display:flex; animation:toast-in .16s ease; }
   .audit { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
   .audit-row { padding:8px 0; border-top:1px solid var(--line); font-size:12px; }
   .audit-row summary { display:flex; gap:12px; justify-content:space-between; cursor:pointer; }
   .audit-detail { color:#9fb2cc; white-space:pre-wrap; font:11px ui-monospace,monospace; margin:8px 0 0; }
   .audit-row small { color:#9fb2cc; }
   .controls { margin-bottom: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
-  input, select, button { padding:9px; border:1px solid var(--line); border-radius:8px; background:#0a1626; color:var(--ink); }
+  input, select, button { padding:9px; border:1px solid var(--line); border-radius:8px; background:var(--panel-soft); color:var(--text); }
   input.q { width: 260px; }
-  button { background:var(--brand2); color:#fff; cursor:pointer; font-weight:650; }
+  button { background:var(--brand-strong); color:#fff; cursor:pointer; font-weight:650; }
   button.secondary { background:#17253a; }
   button.danger { background:#be123c; }
   button:disabled { opacity:.45; cursor:not-allowed; }
   .tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
-  .tab { padding:7px 12px; background:var(--panel); border:1px solid var(--line); border-radius:7px; cursor:pointer; font-size:13px; }
+  .tab { padding:7px 12px; background:var(--panel); border:1px solid var(--line); border-radius:7px; cursor:pointer; font-size:13px; transition:background var(--ease),transform var(--ease); }
+  .tab:hover { transform:translateY(-1px); }
   .tab.active { background: var(--brand); color: #fff; border-color: var(--brand); }
   table { border-collapse:collapse; width:100%; background:var(--panel); font-size:12px; }
   th, td { border:1px solid var(--line); padding:7px 8px; text-align:left; vertical-align:top; }
   th { background:#123b3a; color:#fff; position:sticky; top:0; cursor:pointer; white-space:nowrap; }
   td.long { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+  tbody tr { transition:background .14s ease,transform .14s ease; }
+  tbody tr:hover { filter:brightness(1.14); }
+  .common details { max-width:260px; color:#9fb2cc; margin-bottom:5px; }
+  .common summary { cursor:pointer; color:#93c5fd; }
+  #pager { display:inline-flex; align-items:center; gap:6px; margin-left:auto; }
+  #pager button { padding:7px 10px; }
+  #pager select { padding:7px; }
+  #loading { max-width:1200px; margin:auto; }
   .wrap { overflow: auto; max-height: 68vh; }
   .empty { padding:40px; text-align:center; color:#9fb2cc; }
   @media (max-width:900px) {
@@ -66,6 +76,7 @@
   }
   @media print { .controls, .tabs, .control, .audit, .live { display:none; } th { position:static; } body { margin:0; background:#fff; color:#222; } }
 </style>
+<link rel="stylesheet" href="tokens.css">
 </head>
 <body>
   <header class="hero">
@@ -83,8 +94,8 @@
         <div><button class="secondary" id="selectAll">Выбрать все формы</button> <button class="secondary" id="selectShown">Выбрать отфильтрованные</button> <button class="secondary" id="clearSelected">Очистить</button></div>
       </div>
       <div class="common">
-        <h2>Общие вопросы выбранных форм</h2>
-        <div class="common-help">Показываются только вопросы, присутствующие во всех выбранных формах. Названия берутся из пользовательского label, технический ключ показан отдельно.</div>
+        <div class="control-head"><h2>Общие вопросы выбранных форм</h2><label>Порог большинства: <output id="commonThresholdValue">80%</output> <input id="commonThreshold" type="range" min="50" max="100" value="80"></label></div>
+        <div class="common-help">Вопрос считается общим, когда встречается минимум в указанной доле выборки. Исключения можно проверить и убрать из выделения.</div>
         <div class="common-wrap" id="commonQuestions">Выберите формы, чтобы увидеть общие вопросы.</div>
       </div>
       <h2>Расширенное массовое изменение</h2>
@@ -111,14 +122,17 @@
       <input class="q" id="q" placeholder="Поиск...">
       <select id="sev"><option value="">Все severity</option><option>CRIT</option><option>WARN</option><option>INFO</option><option>OK</option></select>
       <button id="print">🖨 Печать / PDF</button>
+      <span id="pager"></span>
     </div>
 
     <div class="wrap"><table id="t"><thead></thead><tbody></tbody></table></div>
   </div>
 
-  <div class="empty" id="empty">
-    Нет данных. Откройте вкладку Bitrix24, затем запустите анализ из попапа расширения.
+  <div id="loading"><div class="skeleton" style="height:96px;margin-bottom:14px"></div><div class="skeleton" style="height:260px"></div></div>
+  <div class="empty-state" id="empty" style="display:none">
+    <strong>Данных анализа пока нет</strong><br>Откройте Bitrix24 и запустите анализ из попапа расширения.
   </div>
+  <div id="toast" class="toast" role="status" aria-live="polite" style="display:none"></div>
 
   <script src="report.js"></script>
 </body>

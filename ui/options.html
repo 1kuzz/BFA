@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <title>Настройки — Forms Analyzer</title>
 <style>
-  :root { --brand:#1F6F5C; }
   body { font-family: -apple-system, Segoe UI, Arial, sans-serif; max-width: 780px; margin: 24px auto; padding: 0 16px; color: #222; }
   h1 { color: var(--brand); font-size: 20px; }
   h2 { font-size: 15px; margin-top: 24px; border-bottom: 1px solid #eee; padding-bottom: 4px; }
@@ -21,6 +20,7 @@
   #saved { color: var(--brand); font-size: 13px; margin-left: 10px; }
   .profbar { display: flex; gap: 8px; align-items: center; }
 </style>
+<link rel="stylesheet" href="tokens.css">
 </head>
 <body>
   <h1>Bitrix24 Forms Analyzer — настройки</h1>
@@ -30,7 +30,7 @@
     <select id="profileSel" style="max-width:220px"></select>
     <button class="ghost" id="newProfile">+ Новый</button>
     <button class="ghost" id="delProfile">Удалить</button>
-    <span class="hint">Регионы (LATAM/META/EMEA/RU) — разные требования.</span>
+    <span class="hint">Каждый инстанс использует собственные правила.</span>
   </div>
 
   <div class="row">
@@ -42,6 +42,10 @@
       <div class="check"><input type="checkbox" id="requireCaptcha"><span>Требовать captcha</span></div>
       <div class="check"><input type="checkbox" id="requireVisitorId"><span>Требовать VisitorID</span></div>
       <div class="check"><input type="checkbox" id="requireMarketoId"><span>Требовать Marketo ID</span></div>
+      <label>Исключить языки <span class="hint">(через запятую)</span></label>
+      <input type="text" id="excludeLanguages" placeholder="la">
+      <label>Исключить регионы <span class="hint">(через запятую)</span></label>
+      <input type="text" id="excludeRegions" placeholder="Americas">
     </div>
     <div class="col">
       <label>Preset-паттерны (JSON: поле → regex)</label>

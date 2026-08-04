@@ -4,6 +4,12 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function 
 var R = null; // lastResult
 var currentTab = 'forms';
 var selected = {}, lastFiltered = [], pendingPlan = null;
+var page = 1, pageSize = 100;
+
+function toast(message) {
+  $('toast').textContent = message; $('toast').style.display = 'block';
+  clearTimeout(toast.timer); toast.timer = setTimeout(function () { $('toast').style.display = 'none'; }, 3200);
+}
 
 $('print').onclick = function () { window.print(); };
 
@@ -38,6 +44,15 @@ function donutSVG(data, colors) {
     return '<path d="M16,16 L' + x0.toFixed(2) + ',' + y0.toFixed(2) + ' A12,12 0 ' + large + ',1 ' + x1.toFixed(2) + ',' + y1.toFixed(2) + ' Z" fill="' + colors[i % colors.length] + '"><title>' + esc(d[0]) + ': ' + d[1] + '</title></path>';
   }).join('');
   return '<svg viewBox="0 0 32 32" style="width:120px;height:120px">' + segs + '<circle cx="16" cy="16" r="6" fill="#111c2f"/></svg>';
+}
+function sparkline(key, color) {
+  var values = (R.historyStats || []).map(function (item) { return item[key]; }).filter(function (v) { return typeof v === 'number'; });
+  if (values.length < 2) return '<span class="trend">Тренд появится после следующего прогона</span>';
+  var min = Math.min.apply(null, values), max = Math.max.apply(null, values), span = max - min || 1;
+  var points = values.map(function (value, i) {
+    return (i * 80 / (values.length - 1)).toFixed(1) + ',' + (16 - (value - min) * 14 / span).toFixed(1);
+  }).join(' ');
+  return '<svg class="spark" viewBox="0 0 80 18" preserveAspectRatio="none" aria-label="Тренд"><polyline points="' + points + '" fill="none" stroke="' + color + '" stroke-width="2"/></svg>';
 }
 
 var TABS = [
@@ -74,8 +89,11 @@ function tableDef(tab) {
     data: R.presetIssuesAll.map(function (p) { return { sev: 'CRIT', cells: [p.id, p.field, p.value, p.issue] }; })
   };
   if (tab === 'dupes') return {
-    cols: ['Язык', 'Форм', 'Тип', 'ID форм'],
-    data: R.clusters.map(function (c) { return { sev: 'INFO', cells: [c.lang, c.size, c.exact ? 'точный' : 'почти', c.ids.join(', ')] }; })
+    cols: ['Язык', 'Форм', 'Категория', 'Различия', 'ID форм'],
+    data: R.clusters.map(function (c) {
+      var labels = { full_duplicate: 'полный дубль', redirect_only: 'только другой редирект', field_variant: 'другие настройки', near_duplicate: 'почти-дубль' };
+      return { sev: 'INFO', cells: [c.lang, c.size, labels[c.category] || (c.exact ? 'точный' : 'почти'), c.differences || '', c.ids.join(', ')] };
+    })
   };
   if (tab === 'anomalies') return {
     cols: ['Поле', 'В формах', 'Проблема'],
@@ -87,7 +105,7 @@ function tableDef(tab) {
   };
   if (tab === 'agreements') return {
     cols: ['Agreement ID', 'Name', 'Вариантов текста', 'Форм'],
-    data: R.agrConflicts.map(function (c) { return { sev: 'WARN', cells: [c.id, c.name, c.variants, c.forms] }; })
+    data: R.agrConflicts.map(function (c) { return { sev: 'CRIT', cells: [c.id, c.name, c.variants, c.forms] }; })
   };
   if (tab === 'consent') return {
     cols: ['Язык', 'Ожидаемый', 'Фактический', 'Статус', 'ID'],
@@ -104,6 +122,17 @@ function tableDef(tab) {
   return { cols: [], data: [] };
 }
 
+function renderPager(total) {
+  var pages = Math.max(1, Math.ceil(total / pageSize)); page = Math.min(page, pages);
+  $('pager').innerHTML = '<button class="secondary" id="pagePrev"' + (page === 1 ? ' disabled' : '') + '>←</button> ' +
+    '<span>' + page + ' / ' + pages + ' · ' + total + '</span> <button class="secondary" id="pageNext"' + (page === pages ? ' disabled' : '') + '>→</button> ' +
+    '<select id="pageSize" aria-label="Строк на странице"><option>50</option><option>100</option><option>200</option></select>';
+  $('pageSize').value = String(pageSize);
+  $('pagePrev').onclick = function () { page--; renderTable(); };
+  $('pageNext').onclick = function () { page++; renderTable(); };
+  $('pageSize').onchange = function () { pageSize = parseInt(this.value); page = 1; renderTable(); };
+}
+
 function renderTable() {
   var def = tableDef(currentTab);
   var thead = $('t').tHead, tbody = $('t').tBodies[0];
@@ -117,9 +146,11 @@ function renderTable() {
     return okS && okQ;
   });
   lastFiltered = selectable ? filtered : [];
+  renderPager(filtered.length);
 
   if (!filtered.length) { tbody.innerHTML = '<tr><td colspan="' + (def.cols.length + (selectable ? 1 : 0)) + '" class="empty">Ничего не найдено</td></tr>'; return; }
-  tbody.innerHTML = filtered.map(function (row) {
+  var visibleRows = filtered.slice((page - 1) * pageSize, page * pageSize);
+  tbody.innerHTML = visibleRows.map(function (row) {
     var checkbox = selectable ? '<td><input type="checkbox" data-form-id="' + esc(row.id) + '"' + (selected[row.id] ? ' checked' : '') + '></td>' : '';
     return '<tr style="background:' + (sevColor[row.sev] || '#111c2f') + '">' + checkbox + row.cells.map(function (v) { return '<td class="long">' + esc(v) + '</td>'; }).join('') + '</tr>';
   }).join('');
@@ -157,7 +188,7 @@ function renderTabs() {
     return '<div class="tab' + (t.id === currentTab ? ' active' : '') + '" data-tab="' + t.id + '">' + esc(t.label) + ' <b>' + count + '</b></div>';
   }).join('');
   [].forEach.call($('tabs').children, function (el) {
-    el.onclick = function () { currentTab = el.getAttribute('data-tab'); renderTabs(); renderTable(); };
+    el.onclick = function () { currentTab = el.getAttribute('data-tab'); page = 1; renderTabs(); renderTable(); };
   });
 }
 
@@ -171,11 +202,11 @@ function render() {
 
   var s = R.sevCount;
   $('stats').innerHTML =
-    '<div class="card crit"><b>' + s.CRIT + '</b>🔴 Критичных</div>' +
-    '<div class="card warn"><b>' + s.WARN + '</b>🟡 Предупреждений</div>' +
-    '<div class="card info"><b>' + s.INFO + '</b>🔵 Инфо</div>' +
-    '<div class="card ok"><b>' + s.OK + '</b>🟢 OK</div>' +
-    '<div class="card"><b>' + R.avgScore + '</b>Ср. Quality Score</div>' +
+    '<div class="card crit"><b>' + s.CRIT + '</b>🔴 Критичных' + sparkline('CRIT', '#fb7185') + '</div>' +
+    '<div class="card warn"><b>' + s.WARN + '</b>🟡 Предупреждений' + sparkline('WARN', '#fbbf24') + '</div>' +
+    '<div class="card info"><b>' + s.INFO + '</b>🔵 Инфо' + sparkline('INFO', '#60a5fa') + '</div>' +
+    '<div class="card ok"><b>' + s.OK + '</b>🟢 OK' + sparkline('OK', '#10b981') + '</div>' +
+    '<div class="card"><b>' + R.avgScore + '</b>Ср. Quality Score' + sparkline('avgScore', '#a78bfa') + '</div>' +
     '<div class="card"><b>' + R.clusters.length + '</b>Кластеров дублей</div>' +
     '<div class="card"><b>' + R.rows.filter(function (r) { return r.redirectIssue; }).length + '</b>Проблем редиректов</div>' +
     '<div class="card"><b>' + (R.diffChanges ? R.diffChanges.length : 0) + '</b>Изменений с прошлого раза</div>';
@@ -192,10 +223,11 @@ function render() {
   renderTabs();
   renderTable();
   updateSelection();
-  $('q').oninput = renderTable;
-  $('sev').onchange = renderTable;
+  $('q').oninput = function () { page = 1; renderTable(); };
+  $('sev').onchange = function () { page = 1; renderTable(); };
 
   $('empty').style.display = 'none';
+  $('loading').style.display = 'none';
   $('dashboard').style.display = 'block';
 }
 
@@ -215,36 +247,44 @@ function renderCommonQuestions() {
     return;
   }
 
-  var common = {};
-  rows[0].questions.forEach(function (question) {
-    common[question.name] = {
-      name: question.name, labels: [question.label || question.name],
-      required: [question.required], visible: [question.visible]
-    };
-  });
-  rows.slice(1).forEach(function (row) {
-    var byName = {};
-    row.questions.forEach(function (question) { byName[question.name] = question; });
-    Object.keys(common).forEach(function (name) {
-      var question = byName[name];
-      if (!question) { delete common[name]; return; }
-      common[name].labels.push(question.label || question.name);
-      common[name].required.push(question.required);
-      common[name].visible.push(question.visible);
+  var common = {}, threshold = parseInt($('commonThreshold').value) || 80;
+  $('commonThresholdValue').textContent = threshold + '%';
+  rows.forEach(function (row) {
+    var seen = {};
+    row.questions.forEach(function (question) {
+      if (!question.name || seen[question.name]) return;
+      seen[question.name] = true;
+      var item = common[question.name] || (common[question.name] = {
+        name: question.name, labels: [], required: [], visible: [], formIds: []
+      });
+      item.labels.push(question.label || question.name); item.required.push(question.required);
+      item.visible.push(question.visible); item.formIds.push(row.id);
     });
   });
 
-  var questions = Object.keys(common).map(function (name) { return common[name]; });
+  var questions = Object.keys(common).map(function (name) { return common[name]; }).filter(function (question) {
+    return question.formIds.length * 100 / rows.length >= threshold;
+  });
   questions.sort(function (a, b) { return a.labels[0].localeCompare(b.labels[0], 'ru'); });
-  if (!questions.length) { $('commonQuestions').textContent = 'У выбранных форм нет общих вопросов.'; return; }
+  if (!questions.length) {
+    $('commonQuestions').textContent = 'Даже с порогом ' + threshold + '% нет общих полей. Вероятно, выбраны формы разных типов — сузьте фильтр или тип формы.';
+    return;
+  }
 
-  $('commonQuestions').innerHTML = '<table><thead><tr><th>Вопрос</th><th>Технический ключ</th><th>Обяз.</th><th>Виден</th><th>Новое название</th><th>Обяз.</th><th>Виден</th><th></th></tr></thead><tbody>' +
+  $('commonQuestions').innerHTML = '<table><thead><tr><th>Вопрос</th><th>Технический ключ</th><th>Охват</th><th>Исключения</th><th>Обяз.</th><th>Виден</th><th>Новое название</th><th>Обяз.</th><th>Виден</th><th></th></tr></thead><tbody>' +
     questions.map(function (question) {
       var labels = Array.from(new Set(question.labels));
       var original = labels.length === 1 ? labels[0] : '';
       var title = labels.length === 1 ? labels[0] : 'Разные названия: ' + labels.join(' / ');
-      return '<tr data-question="' + esc(question.name) + '"><td data-label="Вопрос" title="' + esc(title) + '">' + esc(title) +
-        '</td><td data-label="Технический ключ"><code>' + esc(question.name) + '</code></td><td data-label="Сейчас обязательный">' + esc(stateLabel(question.required)) +
+      var present = {}; question.formIds.forEach(function (id) { present[id] = true; });
+      var missing = rows.filter(function (row) { return !present[row.id]; });
+      var exceptions = missing.length ? '<details><summary>' + missing.length + ' форм</summary>' + missing.map(function (row) {
+        return '<div>#' + esc(row.id) + ' ' + esc(row.name) + '</div>';
+      }).join('') + '</details><button class="secondary remove-missing" data-missing="' + esc(missing.map(function (row) { return row.id; }).join(',')) + '">Снять их</button>' : 'Нет';
+      return '<tr data-question="' + esc(question.name) + '" data-present="' + esc(question.formIds.join(',')) + '"><td data-label="Вопрос" title="' + esc(title) + '">' + esc(title) +
+        '</td><td data-label="Технический ключ"><code>' + esc(question.name) + '</code></td>' +
+        '<td data-label="Охват"><b>' + question.formIds.length + ' из ' + rows.length + '</b></td><td data-label="Исключения">' + exceptions +
+        '</td><td data-label="Сейчас обязательный">' + esc(stateLabel(question.required)) +
         '</td><td data-label="Сейчас виден">' + esc(stateLabel(question.visible)) + '</td><td data-label="Новое название"><input class="question-label" data-original="' +
         esc(original) + '" value="' + esc(original) + '" placeholder="Введите единое название"></td>' +
         '<td data-label="Новая обязательность"><select class="question-required"><option value="keep">Не менять</option><option value="true">Да</option><option value="false">Нет</option></select></td>' +
@@ -260,7 +300,7 @@ function renderCommonQuestions() {
       var required = row.querySelector('.question-required').value;
       var visible = row.querySelector('.question-visible').value;
       var operations = [];
-      Object.keys(selected).forEach(function (id) {
+      row.getAttribute('data-present').split(',').filter(Boolean).forEach(function (id) {
         if (label && label !== original) operations.push({ formId: id, kind: 'label', field: field, value: label });
         if (required !== 'keep') operations.push({ formId: id, kind: 'required', field: field, value: required === 'true' });
         if (visible !== 'keep') operations.push({ formId: id, kind: 'visible', field: field, value: visible === 'true' });
@@ -273,7 +313,15 @@ function renderCommonQuestions() {
       requestPreview(operations);
     };
   });
+  [].forEach.call($('commonQuestions').querySelectorAll('.remove-missing'), function (button) {
+    button.onclick = function () {
+      button.getAttribute('data-missing').split(',').filter(Boolean).forEach(function (id) { delete selected[id]; });
+      updateSelection(); renderTable(); toast('Формы без этого поля сняты с выделения');
+    };
+  });
 }
+
+$('commonThreshold').oninput = renderCommonQuestions;
 
 function updateSelection() {
   $('selection').textContent = 'Выбрано: ' + Object.keys(selected).length;
@@ -351,8 +399,9 @@ function requestPreview(operations) {
   $('editPreview').style.display = 'block';
   chrome.runtime.sendMessage({ target: 'sw', type: 'previewEdits', operations: operations }, function (response) {
     $('previewEdits').disabled = false;
-    if (!response || !response.ok) { $('editPreview').textContent = 'Ошибка preview: ' + ((response || {}).error || 'нет ответа'); return; }
+    if (!response || !response.ok) { $('editPreview').textContent = 'Ошибка preview: ' + ((response || {}).error || 'нет ответа'); toast('Preview не создан'); return; }
     pendingPlan = response.plan; renderPlan(pendingPlan);
+    toast('План правок готов — проверьте изменения');
   });
 }
 $('previewEdits').onclick = function () {
@@ -371,10 +420,11 @@ $('applyEdits').onclick = function () {
     target: 'sw', type: 'applyEdits', planId: pendingPlan.id, confirmation: $('confirmation').value.trim()
   }, function (response) {
     $('applyEdits').disabled = false;
-    if (!response || !response.ok) { $('editPreview').textContent += '\n\nОшибка применения: ' + ((response || {}).error || 'нет ответа'); return; }
+    if (!response || !response.ok) { $('editPreview').textContent += '\n\nОшибка применения: ' + ((response || {}).error || 'нет ответа'); toast('Правки не применены'); return; }
     var results = response.record.results;
     $('editPreview').textContent += '\n\nЗавершено: ' + results.map(function (r) { return '#' + r.id + ' ' + r.status; }).join(', ') + '\nЗапустите анализ для обновления метрик.';
     pendingPlan = null; $('approval').className = 'approval'; loadAudit();
+    toast('Правки применены и проверены');
   });
 };
 updateEditor();
@@ -382,7 +432,8 @@ loadAudit();
 
 function load() {
   chrome.storage.local.get('lastResult', function (d) {
-    if (d.lastResult && d.lastResult.rows) { R = d.lastResult; render(); }
+    if (d.lastResult && d.lastResult.rows) { R = d.lastResult; render(); return; }
+    $('loading').style.display = 'none'; $('empty').style.display = 'block';
   });
 }
 load();
