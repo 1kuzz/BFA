@@ -54,6 +54,16 @@ export function cacheKeys(db, store) {
   });
 }
 
+export function cacheDelete(db, k, store) {
+  return new Promise(function (res) {
+    try {
+      var t = db.transaction(store || STORE, 'readwrite').objectStore(store || STORE).delete(k);
+      t.onsuccess = function () { res(); };
+      t.onerror = function () { res(); };
+    } catch (e) { res(); }
+  });
+}
+
 export function deleteDb() {
   return new Promise(function (res) {
     var rq = indexedDB.deleteDatabase(DB_NAME);

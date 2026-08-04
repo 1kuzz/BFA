@@ -1,9 +1,8 @@
 # Bitrix24 Forms Analyzer (BFA)
 
-A Manifest V3 Chrome extension that audits web-to-lead forms configured in
-Bitrix24. It pulls every form via the CRM API, scores each one against a
-configurable rule profile, and produces an interactive dashboard plus
-XLSX/JSONL exports for BI.
+A Manifest V3 Chrome control center for Bitrix24 web forms. It inventories and
+scores every form, exposes fleet-wide analytics, safely edits selected forms,
+and produces an interactive dashboard plus XLSX/JSONL exports for BI.
 
 This is a ground-up rewrite of an earlier one-off console script
 (`forms_all_in_one v4`) as a proper extension: persistent UI, incremental
@@ -30,6 +29,27 @@ sync, region-specific rule profiles, run history, and optional alerting.
 - **Optional webhook** (Slack/Jira-compatible) summarizing CRIT findings
 - **Scheduled runs** via `chrome.alarms`
 
+## 2026 control center
+
+The v6 redesign combines 10 operational features in one workflow:
+
+1. **Fleet command center** — dense health KPIs, charts, risk queues, and searchable inventory.
+2. **Bulk scope control** — select individual forms, every filtered row, or the complete form fleet.
+3. **Common-question editor** — intersect selected forms by technical field key, show human-readable question labels, and bulk-edit label, visibility, and required state.
+4. **Exact dry-run preview** — fetches fresh forms and shows before/after values before any mutation.
+5. **Risk-aware changes** — every edit is labeled LOW, MEDIUM, or HIGH.
+6. **Explicit approval** — applying requires the generated `APPLY N` confirmation within 15 minutes.
+7. **Conflict protection** — the full form is fingerprinted; concurrent changes cancel the write.
+8. **Verified apply and rollback** — every save is read back; failed verification restores the pre-edit form.
+9. **Governance trail** — 100 change runs and rollback backups for the latest 20 runs are retained.
+10. **Policy and evidence** — regional rule profiles, 30-run drift history, XLSX/JSONL/raw exports, and webhook alerts.
+
+Bulk edits are intentionally limited to 100 forms per approved batch. The
+extension updates only properties whose structure is present in the freshly
+fetched form; it never invents missing fields or preset definitions.
+
+Desktop and mobile previews: [screenshots](docs/screenshots/).
+
 ## Install
 
 1. Open `chrome://extensions` and enable **Developer mode**
@@ -37,7 +57,8 @@ sync, region-specific rule profiles, run history, and optional alerting.
 
 ## Usage
 
-1. Open a Bitrix24 / `kasperskyform.eu` tab and sign in
+1. Open the CRM tab and sign in. The built-in `RU` profile uses
+   `https://kasperskyform.com/crm/webform/`; other profiles use the EU instance.
 2. Click the extension icon → pick a rule profile → **Run analysis**
 3. On completion the export files download automatically; **📊 Report**
    opens the live dashboard
@@ -52,7 +73,7 @@ Built-in profiles:
 |---|---|
 | `Default` | baseline requirements |
 | `LATAM` | requires Marketo ID |
-| `RU` | requires captcha |
+| `RU` | requires captcha; processes only `kasperskyform.com` |
 
 Add your own (e.g. `META`, `EMEA`) with different requirements per region.
 
@@ -98,8 +119,9 @@ instead of using a stored token.
 
 ## Data & scope
 
-The extension only runs on tabs matching `*.bitrix24.eu`, `kasperskyform.eu`,
-and `*.kasperskyform.eu` (see `host_permissions` in `manifest.json`). All
+The `RU` profile is isolated to `kasperskyform.com`; other profiles use
+`*.bitrix24.eu` / `kasperskyform.eu`. The active profile controls both analysis
+and editing, so a Russian preview cannot be applied to the EU instance. All
 API calls are made from the browser using the signed-in user's own session;
 no credentials are stored or transmitted by the extension itself. Exported
 files are saved locally via `chrome.downloads`. The webhook URL (if
@@ -113,3 +135,12 @@ and reload it from `chrome://extensions` after making changes. The service
 worker can be inspected via **Service worker** → **Inspect** on the
 extension's card; the popup/options/report pages can be inspected like any
 normal page via DevTools.
+
+Run the dependency-free checks with Node.js 20 or newer:
+
+```sh
+npm test
+```
+
+When a webhook is saved, Chrome asks for access only to that webhook's HTTPS
+origin. BFA does not request blanket access to external sites at install time.

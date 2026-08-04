@@ -3,8 +3,11 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function 
 
 var R = null; // lastResult
 var currentTab = 'forms';
+var selected = {}, lastFiltered = [], pendingPlan = null;
 
-var sevColor = { CRIT: '#ffd6d6', WARN: '#fff3cf', INFO: '#e3f0ff', OK: '#ffffff' };
+$('print').onclick = function () { window.print(); };
+
+var sevColor = { CRIT: '#3b1725', WARN: '#382d14', INFO: '#142a42', OK: '#111c2f' };
 
 function distrib(rows, key) {
   var map = {};
@@ -21,6 +24,12 @@ function barSVG(data, color) {
     '</svg>';
 }
 function donutSVG(data, colors) {
+  var positive = data.filter(function (d) { return d[1] > 0; });
+  if (positive.length === 1) {
+    return '<svg viewBox="0 0 32 32" style="width:120px;height:120px"><circle cx="16" cy="16" r="12" fill="' +
+      colors[0] + '"><title>' + esc(positive[0][0]) + ': ' + positive[0][1] +
+      '</title></circle><circle cx="16" cy="16" r="6" fill="#111c2f"/></svg>';
+  }
   var tot = data.reduce(function (a, d) { return a + d[1]; }, 0) || 1, acc = 0;
   var segs = data.map(function (d, i) {
     var frac = d[1] / tot, a0 = acc * 2 * Math.PI, a1 = (acc + frac) * 2 * Math.PI; acc += frac;
@@ -28,7 +37,7 @@ function donutSVG(data, colors) {
     var large = frac > 0.5 ? 1 : 0;
     return '<path d="M16,16 L' + x0.toFixed(2) + ',' + y0.toFixed(2) + ' A12,12 0 ' + large + ',1 ' + x1.toFixed(2) + ',' + y1.toFixed(2) + ' Z" fill="' + colors[i % colors.length] + '"><title>' + esc(d[0]) + ': ' + d[1] + '</title></path>';
   }).join('');
-  return '<svg viewBox="0 0 32 32" style="width:120px;height:120px">' + segs + '<circle cx="16" cy="16" r="6" fill="#fff"/></svg>';
+  return '<svg viewBox="0 0 32 32" style="width:120px;height:120px">' + segs + '<circle cx="16" cy="16" r="6" fill="#111c2f"/></svg>';
 }
 
 var TABS = [
@@ -50,7 +59,7 @@ function tableDef(tab) {
   var rows = R.rows;
   if (tab === 'forms') return {
     cols: ['Sev', 'Score', 'ID', 'Имя', 'Язык', 'Регион', 'Тип', 'Консент', 'Подписка', 'Email', 'VisitorID', 'Captcha', 'Редирект', 'CRIT', 'WARN', 'Рекомендации'],
-    data: rows.map(function (r) { return { sev: r.severity, cells: [r.severity, r.score, r.id, r.name, r.language, r.region, r.formType, r.consentVersion, r.subscriptionVersion, r.hasEmail, r.hasVisitorId, r.captcha, r.redirect, r.crit, r.warn, r.recommendations] }; })
+    data: rows.map(function (r) { return { id: r.id, sev: r.severity, cells: [r.severity, r.score, r.id, r.name, r.language, r.region, r.formType, r.consentVersion, r.subscriptionVersion, r.hasEmail, r.hasVisitorId, r.captcha, r.redirect, r.crit, r.warn, r.recommendations] }; })
   };
   if (tab === 'problems') return {
     cols: ['Sev', 'Score', 'ID', 'Имя', 'Язык', 'CRIT', 'WARN', 'Рекомендации'],
@@ -98,7 +107,8 @@ function tableDef(tab) {
 function renderTable() {
   var def = tableDef(currentTab);
   var thead = $('t').tHead, tbody = $('t').tBodies[0];
-  thead.innerHTML = '<tr>' + def.cols.map(function (c) { return '<th>' + esc(c) + '</th>'; }).join('') + '</tr>';
+  var selectable = currentTab === 'forms';
+  thead.innerHTML = '<tr>' + (selectable ? '<th aria-label="Выбор">✓</th>' : '') + def.cols.map(function (c, i) { return '<th data-index="' + i + '">' + esc(c) + '</th>'; }).join('') + '</tr>';
 
   var q = ($('q').value || '').toLowerCase(), s = $('sev').value;
   var filtered = def.data.filter(function (row) {
@@ -106,20 +116,33 @@ function renderTable() {
     var okQ = !q || row.cells.join(' ').toLowerCase().indexOf(q) > -1;
     return okS && okQ;
   });
+  lastFiltered = selectable ? filtered : [];
 
-  if (!filtered.length) { tbody.innerHTML = '<tr><td colspan="' + def.cols.length + '" class="empty">Ничего не найдено</td></tr>'; return; }
+  if (!filtered.length) { tbody.innerHTML = '<tr><td colspan="' + (def.cols.length + (selectable ? 1 : 0)) + '" class="empty">Ничего не найдено</td></tr>'; return; }
   tbody.innerHTML = filtered.map(function (row) {
-    return '<tr style="background:' + (sevColor[row.sev] || '#fff') + '">' + row.cells.map(function (v) { return '<td class="long">' + esc(v) + '</td>'; }).join('') + '</tr>';
+    var checkbox = selectable ? '<td><input type="checkbox" data-form-id="' + esc(row.id) + '"' + (selected[row.id] ? ' checked' : '') + '></td>' : '';
+    return '<tr style="background:' + (sevColor[row.sev] || '#111c2f') + '">' + checkbox + row.cells.map(function (v) { return '<td class="long">' + esc(v) + '</td>'; }).join('') + '</tr>';
   }).join('');
+
+  [].forEach.call(tbody.querySelectorAll('[data-form-id]'), function (box) {
+    box.onchange = function () {
+      if (box.checked) selected[box.getAttribute('data-form-id')] = true;
+      else delete selected[box.getAttribute('data-form-id')];
+      updateSelection();
+    };
+  });
 
   // сортировка по клику
   var ths = thead.rows[0].cells;
-  [].forEach.call(ths, function (th, i) {
+  [].forEach.call(ths, function (th) {
+    var index = th.getAttribute('data-index');
+    if (index == null) return;
+    var cellIndex = parseInt(index) + (selectable ? 1 : 0);
     var asc = 1;
     th.onclick = function () {
       var rs = [].slice.call(tbody.rows);
       rs.sort(function (a, b) {
-        var x = a.cells[i].textContent, y = b.cells[i].textContent, nx = parseFloat(x), ny = parseFloat(y);
+        var x = a.cells[cellIndex].textContent, y = b.cells[cellIndex].textContent, nx = parseFloat(x), ny = parseFloat(y);
         if (!isNaN(nx) && !isNaN(ny)) return (nx - ny) * asc;
         return x.localeCompare(y) * asc;
       });
@@ -139,6 +162,9 @@ function renderTabs() {
 }
 
 function render() {
+  var validIds = {};
+  R.rows.forEach(function (row) { validIds[row.id] = true; });
+  Object.keys(selected).forEach(function (id) { if (!validIds[id]) delete selected[id]; });
   $('meta').textContent = 'Профиль: ' + R.profile + ' · ' + new Date(R.generatedAt).toLocaleString('ru-RU') +
     ' · форм: ' + R.rows.length + ' · ср. Score: ' + R.avgScore +
     ' · ' + R.perfStats.totalSec + 'с · cache-hit ' + R.perfStats.cacheHitPct + '%';
@@ -165,12 +191,194 @@ function render() {
 
   renderTabs();
   renderTable();
+  updateSelection();
   $('q').oninput = renderTable;
   $('sev').onchange = renderTable;
 
   $('empty').style.display = 'none';
   $('dashboard').style.display = 'block';
 }
+
+function stateLabel(values) {
+  var unique = {};
+  values.forEach(function (value) { unique[String(value)] = true; });
+  if (Object.keys(unique).length > 1) return 'Смешано';
+  return values[0] ? 'Да' : 'Нет';
+}
+
+function renderCommonQuestions() {
+  if (!R) return;
+  var rows = R.rows.filter(function (row) { return selected[row.id]; });
+  if (!rows.length) { $('commonQuestions').textContent = 'Выберите формы, чтобы увидеть общие вопросы.'; return; }
+  if (rows.some(function (row) { return !Array.isArray(row.questions); })) {
+    $('commonQuestions').textContent = 'Запустите полный анализ после обновления BFA, чтобы загрузить названия вопросов.';
+    return;
+  }
+
+  var common = {};
+  rows[0].questions.forEach(function (question) {
+    common[question.name] = {
+      name: question.name, labels: [question.label || question.name],
+      required: [question.required], visible: [question.visible]
+    };
+  });
+  rows.slice(1).forEach(function (row) {
+    var byName = {};
+    row.questions.forEach(function (question) { byName[question.name] = question; });
+    Object.keys(common).forEach(function (name) {
+      var question = byName[name];
+      if (!question) { delete common[name]; return; }
+      common[name].labels.push(question.label || question.name);
+      common[name].required.push(question.required);
+      common[name].visible.push(question.visible);
+    });
+  });
+
+  var questions = Object.keys(common).map(function (name) { return common[name]; });
+  questions.sort(function (a, b) { return a.labels[0].localeCompare(b.labels[0], 'ru'); });
+  if (!questions.length) { $('commonQuestions').textContent = 'У выбранных форм нет общих вопросов.'; return; }
+
+  $('commonQuestions').innerHTML = '<table><thead><tr><th>Вопрос</th><th>Технический ключ</th><th>Обяз.</th><th>Виден</th><th>Новое название</th><th>Обяз.</th><th>Виден</th><th></th></tr></thead><tbody>' +
+    questions.map(function (question) {
+      var labels = Array.from(new Set(question.labels));
+      var original = labels.length === 1 ? labels[0] : '';
+      var title = labels.length === 1 ? labels[0] : 'Разные названия: ' + labels.join(' / ');
+      return '<tr data-question="' + esc(question.name) + '"><td data-label="Вопрос" title="' + esc(title) + '">' + esc(title) +
+        '</td><td data-label="Технический ключ"><code>' + esc(question.name) + '</code></td><td data-label="Сейчас обязательный">' + esc(stateLabel(question.required)) +
+        '</td><td data-label="Сейчас виден">' + esc(stateLabel(question.visible)) + '</td><td data-label="Новое название"><input class="question-label" data-original="' +
+        esc(original) + '" value="' + esc(original) + '" placeholder="Введите единое название"></td>' +
+        '<td data-label="Новая обязательность"><select class="question-required"><option value="keep">Не менять</option><option value="true">Да</option><option value="false">Нет</option></select></td>' +
+        '<td data-label="Новая видимость"><select class="question-visible"><option value="keep">Не менять</option><option value="true">Да</option><option value="false">Нет</option></select></td>' +
+        '<td data-label="Проверка"><button class="question-preview">Preview</button></td></tr>';
+    }).join('') + '</tbody></table>';
+
+  [].forEach.call($('commonQuestions').querySelectorAll('.question-preview'), function (button) {
+    button.onclick = function () {
+      var row = button.closest('tr'), field = row.getAttribute('data-question');
+      var labelInput = row.querySelector('.question-label');
+      var label = labelInput.value.trim(), original = labelInput.getAttribute('data-original');
+      var required = row.querySelector('.question-required').value;
+      var visible = row.querySelector('.question-visible').value;
+      var operations = [];
+      Object.keys(selected).forEach(function (id) {
+        if (label && label !== original) operations.push({ formId: id, kind: 'label', field: field, value: label });
+        if (required !== 'keep') operations.push({ formId: id, kind: 'required', field: field, value: required === 'true' });
+        if (visible !== 'keep') operations.push({ formId: id, kind: 'visible', field: field, value: visible === 'true' });
+      });
+      if (!operations.length) {
+        $('editPreview').textContent = 'Укажите новое название, обязательность или видимость.';
+        $('editPreview').style.display = 'block';
+        return;
+      }
+      requestPreview(operations);
+    };
+  });
+}
+
+function updateSelection() {
+  $('selection').textContent = 'Выбрано: ' + Object.keys(selected).length;
+  renderCommonQuestions();
+}
+
+function updateEditor() {
+  var kind = $('editKind').value;
+  var needsField = kind === 'preset' || kind === 'label' || kind === 'required' || kind === 'visible';
+  var isBoolean = kind === 'required' || kind === 'visible';
+  $('fieldWrap').style.display = needsField ? 'block' : 'none';
+  $('editValue').style.display = isBoolean ? 'none' : 'block';
+  $('editBoolean').style.display = isBoolean ? 'block' : 'none';
+  $('editField').placeholder = kind === 'preset' ? 'UF_CRM_CONSENT_VERSION' : 'CONTACT_EMAIL';
+}
+
+function formatValue(value) {
+  if (value === undefined) return 'undefined';
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+function renderPlan(plan) {
+  var lines = ['План ' + plan.id + ' · форм: ' + plan.entries.length];
+  plan.entries.forEach(function (entry) {
+    lines.push('\n#' + entry.id);
+    entry.changes.forEach(function (change) {
+      lines.push('[' + change.risk + '] ' + change.kind + (change.field ? ':' + change.field : '') +
+        '\n  ' + formatValue(change.before) + '  →  ' + formatValue(change.after));
+    });
+  });
+  $('editPreview').textContent = lines.join('\n');
+  $('editPreview').style.display = 'block';
+  $('confirmation').value = '';
+  $('confirmation').placeholder = plan.confirmation;
+  $('approval').className = 'approval show';
+}
+
+function loadAudit() {
+  chrome.storage.local.get('editAudit', function (stored) {
+    var audit = stored.editAudit || [];
+    if (!audit.length) { $('audit').textContent = 'Изменений пока нет.'; return; }
+    $('audit').innerHTML = audit.slice(0, 10).map(function (record) {
+      var applied = record.results.filter(function (r) { return r.status === 'applied'; }).length;
+      var failed = record.results.length - applied;
+      var detail = record.results.map(function (result) {
+        var changes = (result.changes || []).map(function (change) {
+          return change.kind + (change.field ? ':' + change.field : '') + ' [' + change.risk + ']';
+        }).join(', ');
+        return '#' + result.id + ' ' + result.status + (changes ? ' · ' + changes : '') +
+          (result.error ? ' · ' + result.error : '');
+      }).join('\n');
+      return '<details class="audit-row"><summary><span>' + esc(new Date(record.appliedAt).toLocaleString('ru-RU')) +
+        ' · применено ' + applied + (failed ? ' · ошибок/откатов ' + failed : '') +
+        '</span><small>' + esc(record.planId) + '</small></summary><div class="audit-detail">' +
+        esc(detail) + '</div></details>';
+    }).join('');
+  });
+}
+
+$('editKind').onchange = updateEditor;
+$('selectAll').onclick = function () {
+  R.rows.forEach(function (row) { selected[row.id] = true; });
+  updateSelection(); renderTable();
+};
+$('selectShown').onclick = function () {
+  lastFiltered.forEach(function (row) { selected[row.id] = true; });
+  updateSelection(); renderTable();
+};
+$('clearSelected').onclick = function () { selected = {}; updateSelection(); renderTable(); };
+function requestPreview(operations) {
+  pendingPlan = null;
+  $('approval').className = 'approval';
+  $('previewEdits').disabled = true;
+  $('editPreview').textContent = 'Загружаю свежие формы из Bitrix24...';
+  $('editPreview').style.display = 'block';
+  chrome.runtime.sendMessage({ target: 'sw', type: 'previewEdits', operations: operations }, function (response) {
+    $('previewEdits').disabled = false;
+    if (!response || !response.ok) { $('editPreview').textContent = 'Ошибка preview: ' + ((response || {}).error || 'нет ответа'); return; }
+    pendingPlan = response.plan; renderPlan(pendingPlan);
+  });
+}
+$('previewEdits').onclick = function () {
+  var ids = Object.keys(selected);
+  if (!ids.length) { $('editPreview').textContent = 'Выберите хотя бы одну форму.'; $('editPreview').style.display = 'block'; return; }
+  var kind = $('editKind').value;
+  var value = (kind === 'required' || kind === 'visible') ? $('editBoolean').value === 'true' : $('editValue').value;
+  requestPreview(ids.map(function (id) {
+    return { formId: id, kind: kind, field: $('editField').value.trim(), value: value };
+  }));
+};
+$('applyEdits').onclick = function () {
+  if (!pendingPlan) return;
+  $('applyEdits').disabled = true;
+  chrome.runtime.sendMessage({
+    target: 'sw', type: 'applyEdits', planId: pendingPlan.id, confirmation: $('confirmation').value.trim()
+  }, function (response) {
+    $('applyEdits').disabled = false;
+    if (!response || !response.ok) { $('editPreview').textContent += '\n\nОшибка применения: ' + ((response || {}).error || 'нет ответа'); return; }
+    var results = response.record.results;
+    $('editPreview').textContent += '\n\nЗавершено: ' + results.map(function (r) { return '#' + r.id + ' ' + r.status; }).join(', ') + '\nЗапустите анализ для обновления метрик.';
+    pendingPlan = null; $('approval').className = 'approval'; loadAudit();
+  });
+};
+updateEditor();
+loadAudit();
 
 function load() {
   chrome.storage.local.get('lastResult', function (d) {
@@ -182,4 +390,5 @@ load();
 // живое обновление после нового прогона
 chrome.runtime.onMessage.addListener(function (msg) {
   if (msg && msg.target === 'ui' && msg.type === 'done') load();
+  if (msg && msg.target === 'ui' && msg.type === 'editsDone') loadAudit();
 });

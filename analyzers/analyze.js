@@ -31,6 +31,12 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
   Object.keys(raw).forEach(function (id) {
     var top = raw[id], d = top.data || {};
     var fields = Array.isArray(d.fields) ? d.fields : [];
+    var questions = fields.map(function (f) {
+      return {
+        name: f.name || '', label: clean(f.label || f.name),
+        required: !!f.required, visible: f.visible !== false
+      };
+    }).filter(function (f) { return f.name; });
     var visible = fields.filter(function (f) { return f.visible !== false; });
     var visNames = visible.map(function (f) { return f.name; });
     visible.forEach(function (f) {
@@ -91,6 +97,7 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
       id: id, name: clean(top.name), language: lang, entity: entity, region: nmeta.region, formType: nmeta.formType, product: nmeta.product, color: nmeta.color,
       theme: (d.design || {}).theme || '', buttonCaption: clean(d.buttonCaption),
       visibleCount: visible.length, visibleFields: visNames.join(', '),
+      questions: questions,
       requiredFields: visible.filter(function (f) { return f.required; }).map(function (f) { return f.name; }).join(', '),
       presetCount: preset.length, consentVersion: cv, subscriptionVersion: sv,
       hasVisitorId: pnames.indexOf('UF_CRM_VISITOR_ID') > -1 ? 'Y' : 'N',

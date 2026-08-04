@@ -4,47 +4,113 @@
 <meta charset="utf-8">
 <title>Forms Report</title>
 <style>
-  :root { --brand:#1F6F5C; --crit:#c0392b; --warn:#b7791f; --info:#2b6cb0; }
-  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 20px; background: #f5f6f8; color: #222; }
-  h1 { color: var(--brand); font-size: 22px; margin: 0 0 2px; }
-  .meta { font-size: 12px; color: #888; margin-bottom: 16px; }
+  :root { --brand:#10b981; --brand2:#0f766e; --ink:#dbeafe; --panel:#111c2f; --line:#2a3952; --crit:#fb7185; --warn:#fbbf24; --info:#60a5fa; }
+  * { box-sizing: border-box; }
+  body { font-family: Inter, ui-sans-serif, -apple-system, Segoe UI, Arial, sans-serif; margin: 0; padding: 24px; background: #07111f; color: var(--ink); }
+  .hero { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:22px 24px; margin-bottom:16px; border:1px solid var(--line); border-radius:16px; background:linear-gradient(120deg,#102238,#0b302d); }
+  h1 { color:#fff; font-size:24px; margin:0 0 5px; letter-spacing:-.02em; }
+  h2 { margin:0 0 12px; font-size:16px; color:#fff; }
+  .meta { font-size:12px; color:#9fb2cc; }
+  .live { padding:7px 11px; border:1px solid #34d399; border-radius:999px; color:#6ee7b7; font-size:11px; font-weight:800; letter-spacing:.08em; }
   .stats { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
-  .card { background: #fff; border-radius: 8px; padding: 12px 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px; min-width:130px; }
   .card b { font-size: 22px; display: block; }
   .crit b { color: var(--crit); } .warn b { color: var(--warn); } .info b { color: var(--info); } .ok b { color: var(--brand); }
   .charts { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; }
-  .chart { background: #fff; border-radius: 8px; padding: 12px 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1); flex: 1; min-width: 220px; }
+  .chart { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 16px; flex:1; min-width:220px; }
   .chart h3 { margin: 0 0 8px; font-size: 13px; }
+  .control { background:linear-gradient(135deg,#111c2f,#102b2d); border:1px solid #256e67; border-radius:14px; padding:18px; margin-bottom:16px; }
+  .control-head { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .control-grid { display:grid; grid-template-columns:minmax(180px,1fr) minmax(160px,1fr) minmax(220px,2fr) auto; gap:8px; align-items:end; }
+  .control label { display:block; color:#9fb2cc; font-size:11px; margin-bottom:5px; }
+  .selection { color:#6ee7b7; font-size:12px; font-weight:700; }
+  .common { margin:14px 0; border-top:1px solid #256e67; padding-top:14px; }
+  .common-help { color:#9fb2cc; font-size:12px; margin:-6px 0 10px; }
+  .common-wrap { overflow:auto; max-height:360px; }
+  .common table { min-width:900px; }
+  .common input, .common select { width:100%; min-width:120px; }
+  .common code { color:#93c5fd; font-size:11px; }
+  .preview { margin-top:12px; padding:12px; border:1px solid var(--line); border-radius:10px; background:#081421; white-space:pre-wrap; font:12px ui-monospace,monospace; display:none; max-height:260px; overflow:auto; }
+  .approval { display:none; gap:8px; align-items:center; margin-top:10px; }
+  .approval.show { display:flex; }
+  .audit { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .audit-row { padding:8px 0; border-top:1px solid var(--line); font-size:12px; }
+  .audit-row summary { display:flex; gap:12px; justify-content:space-between; cursor:pointer; }
+  .audit-detail { color:#9fb2cc; white-space:pre-wrap; font:11px ui-monospace,monospace; margin:8px 0 0; }
+  .audit-row small { color:#9fb2cc; }
   .controls { margin-bottom: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
-  input, select, button { padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
+  input, select, button { padding:9px; border:1px solid var(--line); border-radius:8px; background:#0a1626; color:var(--ink); }
   input.q { width: 260px; }
-  button { background: var(--brand); color: #fff; border: none; cursor: pointer; }
+  button { background:var(--brand2); color:#fff; cursor:pointer; font-weight:650; }
+  button.secondary { background:#17253a; }
+  button.danger { background:#be123c; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
   .tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
-  .tab { padding: 7px 12px; background: #fff; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .tab { padding:7px 12px; background:var(--panel); border:1px solid var(--line); border-radius:7px; cursor:pointer; font-size:13px; }
   .tab.active { background: var(--brand); color: #fff; border-color: var(--brand); }
-  table { border-collapse: collapse; width: 100%; background: #fff; font-size: 12px; }
-  th, td { border: 1px solid #e0e0e0; padding: 6px 8px; text-align: left; vertical-align: top; }
-  th { background: var(--brand); color: #fff; position: sticky; top: 0; cursor: pointer; white-space: nowrap; }
+  table { border-collapse:collapse; width:100%; background:var(--panel); font-size:12px; }
+  th, td { border:1px solid var(--line); padding:7px 8px; text-align:left; vertical-align:top; }
+  th { background:#123b3a; color:#fff; position:sticky; top:0; cursor:pointer; white-space:nowrap; }
   td.long { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
   .wrap { overflow: auto; max-height: 68vh; }
-  .empty { padding: 40px; text-align: center; color: #888; }
-  @media print { .controls, .tabs { display: none; } th { position: static; } body { margin: 0; } }
+  .empty { padding:40px; text-align:center; color:#9fb2cc; }
+  @media (max-width:900px) {
+    .control-grid { grid-template-columns:1fr; } body { padding:12px; }
+    .common table { min-width:0; }
+    .common thead { display:none; }
+    .common tbody, .common tr, .common td { display:block; width:100%; }
+    .common tr { border:1px solid var(--line); border-radius:10px; padding:8px; margin-bottom:10px; }
+    .common td { border:0; padding:6px 0; }
+    .common td::before { content:attr(data-label); display:block; color:#9fb2cc; font-size:10px; margin-bottom:3px; }
+    .common .question-preview { width:100%; }
+  }
+  @media print { .controls, .tabs, .control, .audit, .live { display:none; } th { position:static; } body { margin:0; background:#fff; color:#222; } }
 </style>
 </head>
 <body>
-  <h1>Анализ форм Bitrix24</h1>
-  <div class="meta" id="meta"></div>
+  <header class="hero">
+    <div><h1>BFA Control Center</h1><div class="meta" id="meta"></div></div>
+    <span class="live">LIVE GOVERNANCE</span>
+  </header>
 
   <div id="dashboard" style="display:none">
     <div class="stats" id="stats"></div>
     <div class="charts" id="charts"></div>
+
+    <section class="control" aria-labelledby="controlTitle">
+      <div class="control-head">
+        <div><h2 id="controlTitle">Управление формами</h2><div class="selection" id="selection">Выбрано: 0</div></div>
+        <div><button class="secondary" id="selectAll">Выбрать все формы</button> <button class="secondary" id="selectShown">Выбрать отфильтрованные</button> <button class="secondary" id="clearSelected">Очистить</button></div>
+      </div>
+      <div class="common">
+        <h2>Общие вопросы выбранных форм</h2>
+        <div class="common-help">Показываются только вопросы, присутствующие во всех выбранных формах. Названия берутся из пользовательского label, технический ключ показан отдельно.</div>
+        <div class="common-wrap" id="commonQuestions">Выберите формы, чтобы увидеть общие вопросы.</div>
+      </div>
+      <h2>Расширенное массовое изменение</h2>
+      <div class="control-grid">
+        <div><label for="editKind">Изменение</label><select id="editKind">
+          <option value="name">Имя формы</option><option value="title">Заголовок</option>
+          <option value="buttonCaption">Текст кнопки</option><option value="successUrl">HTTPS-редирект</option>
+          <option value="preset">Существующее preset-поле</option><option value="label">Текст вопроса</option><option value="required">Обязательность поля</option>
+          <option value="visible">Видимость поля</option>
+        </select></div>
+        <div id="fieldWrap" style="display:none"><label for="editField">Поле</label><input id="editField" placeholder="CONTACT_EMAIL"></div>
+        <div><label for="editValue">Новое значение</label><input id="editValue" placeholder="Введите значение"><select id="editBoolean" style="display:none"><option value="true">Да</option><option value="false">Нет</option></select></div>
+        <button id="previewEdits">Preview</button>
+      </div>
+      <div class="preview" id="editPreview"></div>
+      <div class="approval" id="approval"><input id="confirmation" placeholder="Строка подтверждения"><button class="danger" id="applyEdits">Применить и проверить</button></div>
+    </section>
+
+    <section class="audit"><h2>Журнал изменений</h2><div id="audit">Изменений пока нет.</div></section>
 
     <div class="tabs" id="tabs"></div>
 
     <div class="controls">
       <input class="q" id="q" placeholder="Поиск...">
       <select id="sev"><option value="">Все severity</option><option>CRIT</option><option>WARN</option><option>INFO</option><option>OK</option></select>
-      <button onclick="window.print()">🖨 Печать / PDF</button>
+      <button id="print">🖨 Печать / PDF</button>
     </div>
 
     <div class="wrap"><table id="t"><thead></thead><tbody></tbody></table></div>

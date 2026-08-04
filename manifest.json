@@ -1,14 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Bitrix24 Forms Analyzer",
-  "version": "5.0.2",
-  "description": "Аудит, дифф и скоринг форм Bitrix24: severity, консенты, редиректы, дубли, история и экспорт в XLSX/JSONL.",
+  "version": "6.1.1",
+  "description": "Control Center для аудита, безопасного массового редактирования, диффа и скоринга форм Bitrix24.",
   "permissions": ["storage", "downloads", "alarms", "scripting", "tabs"],
   "host_permissions": [
     "https://*.bitrix24.eu/*",
     "https://kasperskyform.eu/*",
-    "https://*.kasperskyform.eu/*"
+    "https://*.kasperskyform.eu/*",
+    "https://kasperskyform.com/*"
   ],
+  "optional_host_permissions": ["https://*/*"],
   "background": {
     "service_worker": "core/service-worker.js",
     "type": "module"
@@ -33,16 +35,11 @@
       "matches": [
         "https://*.bitrix24.eu/*",
         "https://kasperskyform.eu/*",
-        "https://*.kasperskyform.eu/*"
+        "https://*.kasperskyform.eu/*",
+        "https://kasperskyform.com/crm/webform/*"
       ],
       "js": ["core/content.js"],
       "run_at": "document_idle"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["ui/report.html", "vendor/xlsx.full.min.js"],
-      "matches": ["<all_urls>"]
     }
   ]
 }
