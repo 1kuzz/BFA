@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Bitrix24 Forms Analyzer",
-  "version": "6.1.0",
+  "version": "6.1.1",
   "description": "Control Center для аудита, безопасного массового редактирования, диффа и скоринга форм Bitrix24.",
   "permissions": ["storage", "downloads", "alarms", "scripting", "tabs"],
   "host_permissions": [
     "https://*.bitrix24.eu/*",
     "https://kasperskyform.eu/*",
-    "https://*.kasperskyform.eu/*"
+    "https://*.kasperskyform.eu/*",
+    "https://kasperskyform.com/*"
   ],
   "optional_host_permissions": ["https://*/*"],
   "background": {
@@ -34,7 +35,8 @@
       "matches": [
         "https://*.bitrix24.eu/*",
         "https://kasperskyform.eu/*",
-        "https://*.kasperskyform.eu/*"
+        "https://*.kasperskyform.eu/*",
+        "https://kasperskyform.com/crm/webform/*"
       ],
       "js": ["core/content.js"],
       "run_at": "document_idle"

@@ -4,10 +4,23 @@ import assert from 'node:assert/strict';
 import { runPool } from '../core/api.js';
 import { applyEdit, editRisk, normalizeOperation, readEditValue } from '../core/editor.js';
 import { DEFAULT_REQUIREMENTS, makeValidator, scoreForm } from '../core/rules.js';
+import { acceptsCrmHost, acceptsCrmUrl, crmScope } from '../core/scope.js';
 import { analyze } from '../analyzers/analyze.js';
 import { buildSnapshot, diffSnapshots } from '../analyzers/diff.js';
 import { buildSheets, sheetsToXlsx, toJsonl } from '../analyzers/export.js';
 import XLSX from '../vendor/xlsx.full.min.js';
+
+test('RU profile is isolated to the Russian CRM instance', function () {
+  assert.equal(crmScope('RU').expectedUrl, 'https://kasperskyform.com/crm/webform/');
+  assert.equal(acceptsCrmHost('RU', 'kasperskyform.com'), true);
+  assert.equal(acceptsCrmHost('RU', 'sub.kasperskyform.com'), false);
+  assert.equal(acceptsCrmHost('RU', 'kasperskyform.eu'), false);
+  assert.equal(acceptsCrmHost('Default', 'kasperskyform.eu'), true);
+  assert.equal(acceptsCrmHost('Default', 'kasperskyform.com'), false);
+  assert.equal(acceptsCrmUrl('RU', 'https://kasperskyform.com/crm/webform/'), true);
+  assert.equal(acceptsCrmUrl('RU', 'https://kasperskyform.com/crm/webform/edit/42/'), true);
+  assert.equal(acceptsCrmUrl('RU', 'https://kasperskyform.com/other/'), false);
+});
 
 test('editor validates, patches, and reads only supported form settings', function () {
   var form = {

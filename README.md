@@ -57,7 +57,8 @@ Desktop and mobile previews: [screenshots](docs/screenshots/).
 
 ## Usage
 
-1. Open a Bitrix24 / `kasperskyform.eu` tab and sign in
+1. Open the CRM tab and sign in. The built-in `RU` profile uses
+   `https://kasperskyform.com/crm/webform/`; other profiles use the EU instance.
 2. Click the extension icon → pick a rule profile → **Run analysis**
 3. On completion the export files download automatically; **📊 Report**
    opens the live dashboard
@@ -72,7 +73,7 @@ Built-in profiles:
 |---|---|
 | `Default` | baseline requirements |
 | `LATAM` | requires Marketo ID |
-| `RU` | requires captcha |
+| `RU` | requires captcha; processes only `kasperskyform.com` |
 
 Add your own (e.g. `META`, `EMEA`) with different requirements per region.
 
@@ -118,8 +119,9 @@ instead of using a stored token.
 
 ## Data & scope
 
-The extension only runs on tabs matching `*.bitrix24.eu`, `kasperskyform.eu`,
-and `*.kasperskyform.eu` (see `host_permissions` in `manifest.json`). All
+The `RU` profile is isolated to `kasperskyform.com`; other profiles use
+`*.bitrix24.eu` / `kasperskyform.eu`. The active profile controls both analysis
+and editing, so a Russian preview cannot be applied to the EU instance. All
 API calls are made from the browser using the signed-in user's own session;
 no credentials are stored or transmitted by the extension itself. Exported
 files are saved locally via `chrome.downloads`. The webhook URL (if

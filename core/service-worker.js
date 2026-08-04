@@ -7,6 +7,7 @@
 import { createApi, runPool, sleep } from './api.js';
 import { openDb, cacheGet, cacheSet, cacheKeys, cacheDelete, deleteDb, hashObj, HIST, META } from './cache.js';
 import { DEFAULT_PROFILES } from './rules.js';
+import { acceptsCrmUrl, crmScope } from './scope.js';
 import { applyEdit, editRisk, normalizeOperation, readEditValue } from './editor.js';
 import { analyze } from '../analyzers/analyze.js';
 import { buildSnapshot, diffSnapshots } from '../analyzers/diff.js';
@@ -88,12 +89,12 @@ async function ensureContentScript(tabId) {
   } catch (e) { return false; }
 }
 
-async function findCrmTab() {
-  var matchUrls = ['https://*.bitrix24.eu/*', 'https://*.kasperskyform.eu/*', 'https://kasperskyform.eu/*'];
+async function findCrmTab(profileName) {
+  var scope = crmScope(profileName);
 
   // сначала активная вкладка текущего окна, потом все совпадающие
   var active = await chrome.tabs.query({ active: true, currentWindow: true });
-  var matched = await chrome.tabs.query({ url: matchUrls });
+  var matched = await chrome.tabs.query({ url: scope.matchUrls });
   var ordered = [];
   if (active[0]) ordered.push(active[0]);
   matched.forEach(function (t) { if (!ordered.some(function (o) { return o.id === t.id; })) ordered.push(t); });
@@ -101,10 +102,7 @@ async function findCrmTab() {
   for (var i = 0; i < ordered.length; i++) {
     var tab = ordered[i];
     if (!tab || !tab.url) continue;
-    var host = '';
-    try { host = new URL(tab.url).host; } catch (e) {}
-    var isBx = /(^|\.)bitrix24\.eu$/.test(host) || /(^|\.)?kasperskyform\.eu$/.test(host);
-    if (!isBx) continue;
+    if (!acceptsCrmUrl(profileName, tab.url)) continue;
 
     // добыть sessid напрямую из MAIN world
     var sessid = await probeSessidMainWorld(tab.id);
@@ -181,10 +179,10 @@ async function previewEdits(operations) {
   if (running || editing) throw new Error('Дождитесь завершения текущей операции');
   editing = true;
   try {
-    var grouped = groupOperations(operations);
-    var tab = await findCrmTab();
-    if (!tab) throw new Error('Откройте авторизованную вкладку Bitrix24');
     var settings = await getSettings();
+    var grouped = groupOperations(operations);
+    var tab = await findCrmTab(settings.profileName);
+    if (!tab) throw new Error('Откройте ' + crmScope(settings.profileName).expectedUrl);
     var apiCtx = createApi({ tabId: tab.tabId, sessid: tab.sessid, maxRetries: settings.maxRetries });
     var entries = [];
     var ids = Object.keys(grouped);
@@ -207,6 +205,7 @@ async function previewEdits(operations) {
     if (!entries.length) throw new Error('Выбранные формы уже содержат это значение');
     var plan = {
       id: crypto.randomUUID(), createdAt: Date.now(), sourceHref: tab.href,
+      profileName: settings.profileName,
       entries: entries, confirmation: 'APPLY ' + entries.length
     };
     await chrome.storage.local.set({ pendingEditPlan: plan });
@@ -251,9 +250,13 @@ async function applyEdits(planId, confirmation) {
     if (Date.now() - plan.createdAt > 15 * 60 * 1000) throw new Error('Preview старше 15 минут');
     if (confirmation !== plan.confirmation) throw new Error('Неверная строка подтверждения');
 
-    var tab = await findCrmTab();
-    if (!tab) throw new Error('Откройте авторизованную вкладку Bitrix24');
     var settings = await getSettings();
+    if (settings.profileName !== plan.profileName) throw new Error('Профиль изменился после preview');
+    var tab = await findCrmTab(plan.profileName);
+    if (!tab) throw new Error('Откройте ' + crmScope(plan.profileName).expectedUrl);
+    if (new URL(tab.href).origin !== new URL(plan.sourceHref).origin) {
+      throw new Error('Открыт другой CRM-инстанс. Создайте новый preview');
+    }
     var apiCtx = createApi({ tabId: tab.tabId, sessid: tab.sessid, maxRetries: settings.maxRetries });
     var db = await openDb();
     var results = [];
@@ -315,9 +318,13 @@ async function run(force) {
     var S = await getSettings();
     broadcast({ type: 'status', phase: 'init', text: 'Ищу вкладку Bitrix24...' });
 
-    var tab = await findCrmTab();
+    var tab = await findCrmTab(S.profileName);
     if (!tab) {
-      broadcast({ type: 'error', text: 'Сессия не найдена. Откройте CRM (kasperskyform.eu), войдите и обновите вкладку (F5), затем запустите снова.' });
+      broadcast({
+        type: 'error',
+        text: 'Сессия не найдена. Откройте ' + crmScope(S.profileName).expectedUrl +
+          ', войдите и обновите вкладку (F5), затем запустите снова.'
+      });
       running = false; return;
     }
     broadcast({ type: 'log', text: 'Сессия найдена на ' + tab.href });
