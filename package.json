@@ -1,0 +1,8 @@
+{
+  "name": "bitrix24-forms-analyzer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --check core/*.js analyzers/*.js ui/*.js && node --test"
+  }
+}

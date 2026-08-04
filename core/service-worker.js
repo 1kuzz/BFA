@@ -4,8 +4,8 @@
    анализ -> дифф со снапшотом -> запись истории -> экспорт ->
    опциональный вебхук по CRIT. Прогресс шлётся в popup/report.
    ============================================================ */
-import { createApi, runPool, sleep, clean } from './api.js';
-import { openDb, cacheGet, cacheSet, cacheKeys, deleteDb, hashObj, STORE, HIST, META } from './cache.js';
+import { createApi, runPool, sleep } from './api.js';
+import { openDb, cacheGet, cacheSet, cacheKeys, deleteDb, HIST, META } from './cache.js';
 import { DEFAULT_PROFILES } from './rules.js';
 import { analyze } from '../analyzers/analyze.js';
 import { buildSnapshot, diffSnapshots } from '../analyzers/diff.js';
@@ -147,7 +147,12 @@ async function sendWebhook(url, A, profileName) {
           '\nСредний Score: ' + A.avgScore +
           (crit.length ? '\nТоп CRIT: ' + crit.slice(0, 10).map(function (r) { return r.id + ' (' + (r.crit || '').slice(0, 60) + ')'; }).join('; ') : '')
   };
-  try { await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); }
+  try {
+    var response = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    });
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+  }
   catch (e) { broadcast({ type: 'log', level: 'warn', text: 'Вебхук не отправлен: ' + e.message }); }
 }
 
@@ -191,7 +196,7 @@ async function run(force) {
     broadcast({ type: 'status', phase: 'fetch', text: 'Загружаю детали форм...', done: 0, total: ids.length });
 
     async function fetchForm(id) {
-      if (S.useCache && db && !force) {
+      if (S.useCache && S.incremental && db && !force) {
         var cached = await cacheGet(db, id);
         if (cached) { raw[id] = cached; perf.cacheHits++; return; }
       }

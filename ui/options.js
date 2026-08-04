@@ -32,6 +32,15 @@ function readProfileFromForm() {
   var presetRules;
   try { presetRules = JSON.parse($('presetRules').value); }
   catch (e) { alert('Ошибка в JSON preset-паттернов: ' + e.message); return null; }
+  if (!presetRules || Array.isArray(presetRules) || typeof presetRules !== 'object') {
+    alert('Preset-паттерны должны быть JSON-объектом.'); return null;
+  }
+  try {
+    Object.keys(presetRules).forEach(function (key) {
+      if (typeof presetRules[key] !== 'string') throw new Error(key + ': шаблон должен быть строкой');
+      new RegExp(presetRules[key]);
+    });
+  } catch (e) { alert('Ошибка в regex preset-паттернов: ' + e.message); return null; }
   return { requirements: req, presetRules: presetRules };
 }
 
@@ -102,13 +111,25 @@ $('save').onclick = function () {
     webhookUrl: $('webhookUrl').value.trim()
   };
 
-  chrome.storage.local.set({ settings: settings, profiles: state.profiles, activeProfile: state.active }, function () {
-    // пересоздать аларм
-    chrome.alarms.clear('scheduledRun', function () {
-      if (settings.scheduleMinutes > 0) chrome.alarms.create('scheduledRun', { periodInMinutes: settings.scheduleMinutes });
+  function persist() {
+    chrome.storage.local.set({ settings: settings, profiles: state.profiles, activeProfile: state.active }, function () {
+      // пересоздать аларм
+      chrome.alarms.clear('scheduledRun', function () {
+        if (settings.scheduleMinutes > 0) chrome.alarms.create('scheduledRun', { periodInMinutes: settings.scheduleMinutes });
+      });
+      $('saved').textContent = '✓ Сохранено';
+      setTimeout(function () { $('saved').textContent = ''; }, 2000);
     });
-    $('saved').textContent = '✓ Сохранено';
-    setTimeout(function () { $('saved').textContent = ''; }, 2000);
+  }
+
+  if (!settings.webhookUrl) { persist(); return; }
+  var webhook;
+  try { webhook = new URL(settings.webhookUrl); }
+  catch (e) { alert('Некорректный URL вебхука.'); return; }
+  if (webhook.protocol !== 'https:') { alert('Вебхук должен использовать HTTPS.'); return; }
+  chrome.permissions.request({ origins: [webhook.origin + '/*'] }, function (granted) {
+    if (!granted) { alert('Без разрешения на домен вебхук не сможет работать.'); return; }
+    persist();
   });
 };
 

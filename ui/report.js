@@ -4,6 +4,8 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function 
 var R = null; // lastResult
 var currentTab = 'forms';
 
+$('print').onclick = function () { window.print(); };
+
 var sevColor = { CRIT: '#ffd6d6', WARN: '#fff3cf', INFO: '#e3f0ff', OK: '#ffffff' };
 
 function distrib(rows, key) {

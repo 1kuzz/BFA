@@ -113,3 +113,12 @@ and reload it from `chrome://extensions` after making changes. The service
 worker can be inspected via **Service worker** → **Inspect** on the
 extension's card; the popup/options/report pages can be inspected like any
 normal page via DevTools.
+
+Run the dependency-free checks with Node.js 20 or newer:
+
+```sh
+npm test
+```
+
+When a webhook is saved, Chrome asks for access only to that webhook's HTTPS
+origin. BFA does not request blanket access to external sites at install time.
