@@ -87,12 +87,17 @@ export function buildSheets(A, perfStats, diffChanges, timelineRows, concurrency
 
   var duplicateLabels = {
     full_duplicate: 'полный дубль', redirect_only: 'одинаковые поля, только другой редирект',
+    ownership_variant: 'одинаковые поля, разный ответственный',
     field_variant: 'одинаковые поля, другие настройки', near_duplicate: 'почти-дубль'
   };
-  var dupSheet = [['Язык', 'Форм', 'Категория', 'Различия', 'ID форм']];
+  var dupSheet = [['Язык', 'Форм', 'Категория', 'Различия', 'Ответственный различается', 'Ответственные по формам', 'Решение', 'ID форм']];
   clusters.forEach(function (c) {
     var fallback = c.exact ? 'полный дубль' : 'почти (' + Math.round(dupTh * 100) + '%+)';
-    dupSheet.push([c.lang, c.size, duplicateLabels[c.category] || fallback, c.differences || '', c.ids.join(', ')]);
+    var owners = c.ownershipConflict ? c.ids.map(function (id) {
+      return '#' + id + '=' + (c.responsibleValues[id] || '—');
+    }).join(' / ') : '';
+    dupSheet.push([c.lang, c.size, duplicateLabels[c.category] || fallback, c.differences || '',
+      c.ownershipConflict ? 'ДА — ручной review' : 'Нет', owners, c.decision || '', c.ids.join(', ')]);
   });
   var anomSheet = [['Поле', 'В формах', 'Проблема', 'Решение']];
   anomalies.forEach(function (a) { anomSheet.push([a.field, a.count, a.flags, a.decision || 'Ручная проверка']); });

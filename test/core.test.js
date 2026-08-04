@@ -232,6 +232,52 @@ test('near-duplicate matrix names the missing field and per-form values', functi
   assert.ok(keys.includes('CONTACT_EMAIL:visible'));
 });
 
+test('RU and EU regression parity keeps regional rules, duplicate detail, and ownership review', function () {
+  function form(id, language, consent, responsible) {
+    return {
+      name: (language === 'ru' ? 'RU' : 'EMEA') + '_' + language + '_Download_' + id,
+      data: {
+        language: language, fields: [{
+          name: 'CONTACT_EMAIL', label: 'Email', visible: true, required: true
+        }], agreements: []
+      },
+      captcha: { recaptcha: { use: true } },
+      responsible: { users: [responsible] },
+      presetFields: [
+        { fieldName: 'UF_CRM_CONSENT_VERSION', value: consent },
+        { fieldName: 'UF_CRM_VISITOR_ID', value: '%UF_VISITOR_ID%' }
+      ],
+      result: { success: { url: 'https://example.com/thanks' } }
+    };
+  }
+  var ru = analyze({
+    '1': form('1', 'ru', 'BTX v1', '101'),
+    '2': form('2', 'ru', 'BTX v1', '202')
+  }, DEFAULT_PROFILES.RU.requirements, DEFAULT_PROFILES.RU.presetRules, 0.9);
+  assert.equal(ru.rows.every(function (row) { return !row.presetIssues; }), true);
+  assert.equal(ru.clusters[0].category, 'ownership_variant');
+  assert.equal(ru.clusters[0].ownershipConflict, true);
+  assert.equal(ru.clusters[0].differences, 'нет прочих различий');
+  assert.equal(ru.clusters[0].diffMatrix[0].kind, 'ownership');
+  assert.match(ru.clusters[0].decision, /владельца лидов/);
+
+  var euRaw = {
+    '3': form('3', 'en', 'EN_1', '303'),
+    '4': form('4', 'en', 'EN_1', '303'),
+    '5': form('5', 'la', 'EN_1', '303')
+  };
+  Object.keys(euRaw).forEach(function (id) {
+    if (shouldExcludeForm(euRaw[id], DEFAULT_PROFILES.Default.exclusions)) delete euRaw[id];
+  });
+  var eu = analyze(euRaw, DEFAULT_PROFILES.Default.requirements, DEFAULT_PROFILES.Default.presetRules, 0.9);
+  assert.deepEqual(eu.rows.map(function (row) { return row.id; }), ['3', '4']);
+  assert.equal(eu.clusters[0].category, 'full_duplicate');
+  assert.equal(eu.clusters[0].decision, 'Кандидат на схлопывание');
+  var sheets = buildSheets(ru, { errors: 0 }, [], [], 2, 0.9);
+  assert.equal(sheets['Дубли'][0][4], 'Ответственный различается');
+  assert.match(sheets['Дубли'][1][5], /#1=101/);
+});
+
 test('worker pool respects its concurrency limit and reports completion', async function () {
   var active = 0, peak = 0, progress = [];
   await runPool([1, 2, 3, 4], 2, async function () {

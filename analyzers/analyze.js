@@ -27,7 +27,7 @@ var DUP_SETTINGS = [
   ['theme', 'Theme'], ['agreementIds', 'Agreement IDs'], ['captcha', 'Captcha'],
   ['callback', 'Callback'], ['whatsapp', 'WhatsApp'], ['integration', 'Integration'],
   ['payment', 'Payment'], ['entity', 'Сущность'], ['requiredFields', 'Обязательные поля'],
-  ['presetSignature', 'Preset'], ['dedupe', 'Dedupe'], ['responsible', 'Ответственный']
+  ['presetSignature', 'Preset'], ['dedupe', 'Dedupe']
 ];
 
 function different(values) {
@@ -35,8 +35,9 @@ function different(values) {
 }
 
 function clusterDiff(ids, rowById) {
-  var matrix = [], fieldCount = {}, questions = {};
+  var matrix = [], fieldCount = {}, questions = {}, responsibleValues = {};
   ids.forEach(function (id) {
+    responsibleValues[id] = rowById[id].responsible || '—';
     questions[id] = {};
     (rowById[id].questions || []).forEach(function (question) {
       questions[id][question.name] = question;
@@ -73,7 +74,15 @@ function clusterDiff(ids, rowById) {
     });
     if (different(values)) matrix.push({ kind: 'setting', key: setting[0], label: setting[1], values: values, differs: true });
   });
-  return { diffFields: diffFields.sort(), matrix: matrix };
+  var ownershipConflict = different(responsibleValues);
+  if (ownershipConflict) matrix.unshift({
+    kind: 'ownership', key: 'responsible', label: 'Ответственный',
+    values: responsibleValues, differs: true
+  });
+  return {
+    diffFields: diffFields.sort(), matrix: matrix,
+    ownershipConflict: ownershipConflict, responsibleValues: responsibleValues
+  };
 }
 
 export function analyze(raw, RULES, presetRules, dupThreshold) {
@@ -242,18 +251,31 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
         if (exact) {
           var settingDiffs = diff.matrix.filter(function (row) { return row.kind === 'setting'; });
           var fieldDiffs = diff.matrix.filter(function (row) { return row.kind === 'field'; });
-          if (!settingDiffs.length && !fieldDiffs.length) {
+          if (!settingDiffs.length && !fieldDiffs.length && diff.ownershipConflict) {
+            category = 'ownership_variant'; differences = 'нет прочих различий';
+          } else if (!settingDiffs.length && !fieldDiffs.length) {
             category = 'full_duplicate'; differences = 'нет';
-          } else if (!fieldDiffs.length && settingDiffs.length === 1 && settingDiffs[0].key === 'redirect') {
+          } else if (!fieldDiffs.length && !diff.ownershipConflict && settingDiffs.length === 1 && settingDiffs[0].key === 'redirect') {
             category = 'redirect_only'; differences = 'redirect/landing';
           } else {
             category = 'field_variant';
-            differences = diff.matrix.map(function (row) { return row.label; }).join(', ');
+            differences = diff.matrix.filter(function (row) { return row.kind !== 'ownership'; })
+              .map(function (row) { return row.label; }).join(', ') || 'нет прочих различий';
           }
         }
+        var fieldMismatch = diff.matrix.some(function (row) { return row.kind === 'field'; });
+        var campaignVariation = !fieldMismatch && !diff.ownershipConflict && diff.matrix.some(function (row) {
+          return row.kind === 'setting' && ['redirect', 'successText', 'buttonCaption', 'theme', 'agreementIds'].indexOf(row.key) > -1;
+        });
+        var decision = diff.ownershipConflict ? 'Ручной review владельца лидов' :
+          fieldMismatch ? 'Кандидат на bulk-выравнивание полей' :
+          campaignVariation ? 'Кампанийная вариация — не схлопывать автоматически' :
+          category === 'full_duplicate' ? 'Кандидат на схлопывание' : 'Ручной review';
         clusters.push({
           lang: l, size: cl.length, ids: cl, exact: exact, category: category,
-          differences: differences, diffFields: diff.diffFields, diffMatrix: diff.matrix
+          differences: differences, diffFields: diff.diffFields, diffMatrix: diff.matrix,
+          ownershipConflict: diff.ownershipConflict, responsibleValues: diff.responsibleValues,
+          decision: decision
         });
       }
     });

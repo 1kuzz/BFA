@@ -22,7 +22,8 @@ sync, region-specific rule profiles, run history, and optional alerting.
   (same agreement ID with different text across forms), a consent map by
   language
 - **Interactive duplicate diff** — field/settings matrix with concrete values,
-  keyboard/touch-friendly dialogs, and duplicate badges in the form inventory
+  keyboard/touch-friendly dialogs, duplicate badges in the form inventory,
+  and a separate ownership warning when CRM assignees differ
 - **Agreement governance** — choose or enter canonical Agreement text and apply
   it through the existing preview, approval, readback, and rollback flow
 - **History & diff** — every run is compared against the previous snapshot

@@ -94,6 +94,7 @@ var TABS = [
 
 var DUPLICATE_LABELS = {
   full_duplicate: 'полный дубль', redirect_only: 'только другой редирект',
+  ownership_variant: 'одинаковые поля, разный ответственный',
   field_variant: 'одинаковые поля, другие настройки', near_duplicate: 'почти-дубль (поля)'
 };
 function duplicatePreview(cluster) {
@@ -134,9 +135,10 @@ function tableDef(tab) {
     })
   };
   if (tab === 'dupes') return {
-    cols: ['Сравнить', 'Язык', 'Форм', 'Категория', 'Различия', 'ID форм'],
+    cols: ['Сравнить', 'Язык', 'Форм', 'Категория', 'Различия', 'Ответственный', 'Решение', 'ID форм'],
     data: R.clusters.map(function (c, index) {
-      return { sev: 'INFO', cells: [html(duplicateButton(index, false), 'сравнить'), c.lang, c.size, DUPLICATE_LABELS[c.category] || 'дубль', c.differences || '', c.ids.join(', ')] };
+      var ownership = c.ownershipConflict ? html('<span class="ownership-alert">Требует ручного review</span>', 'Ответственный различается') : 'Совпадает';
+      return { sev: c.ownershipConflict ? 'CRIT' : 'INFO', cells: [html(duplicateButton(index, false), 'сравнить'), c.lang, c.size, DUPLICATE_LABELS[c.category] || 'дубль', c.differences || '', ownership, c.decision || '', c.ids.join(', ')] };
     })
   };
   if (tab === 'anomalies') return {
@@ -172,7 +174,7 @@ function openDuplicate(index) {
   $('duplicateDialogTitle').textContent = DUPLICATE_LABELS[cluster.category] || 'Сравнение дублей';
   $('duplicateDialogMeta').textContent = cluster.size + ' форм · ' + cluster.ids.map(function (id) {
     return '#' + id + ' ' + (rowById[id] || {}).name;
-  }).join(' · ');
+  }).join(' · ') + ' · ' + (cluster.decision || 'Ручной review');
   var matrix = cluster.diffMatrix || [];
   if (!matrix.length) {
     $('duplicateMatrix').innerHTML = '<div class="empty-state">Все анализируемые поля и настройки совпадают. Это кандидат на схлопывание.</div>';
