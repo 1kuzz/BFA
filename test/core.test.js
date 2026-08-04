@@ -103,6 +103,14 @@ test('preset rules and scoring report unsafe forms', function () {
     presetIssues: [], hasVisitorId: true
   }, DEFAULT_PROFILES.Default.requirements);
   assert.equal(wrongLocale.severity, 'CRIT');
+
+  var wrongLocaleNotRequired = scoreForm({
+    consentVersion: 'EN_1', language: 'fr', hasEmail: true, redirectIssue: '', captcha: 'Y',
+    presetIssues: [], hasVisitorId: true
+  }, Object.assign({}, DEFAULT_PROFILES.Default.requirements, { requireConsentVersion: false }));
+  assert.equal(wrongLocaleNotRequired.crit.indexOf('консент EN_1 на локали fr'), -1);
+  assert.equal(wrongLocaleNotRequired.recommendations.indexOf('Локализовать консент для fr'), -1);
+
   var missingCaptcha = scoreForm({
     consentVersion: 'BTX v1', language: 'ru', hasEmail: true, redirectIssue: '', captcha: 'N',
     presetIssues: [], hasVisitorId: true

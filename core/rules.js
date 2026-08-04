@@ -109,7 +109,7 @@ export function scoreForm(ctx, RULES) {
   if (RULES.requireHttpsRedirect && ctx.redirectIssue.indexOf('HTTP') > -1)
     add(crit, 'redirect:http', 'небезопасный редирект: ' + ctx.redirectIssue);
 
-  if (lang !== 'en' && lang !== '' && cv === 'EN_1') {
+  if (RULES.requireConsentVersion && lang !== 'en' && lang !== '' && cv === 'EN_1') {
     var en1 = 'консент EN_1 на локали ' + ctx.language;
     add(RULES.nonEnglishEn1Severity === 'WARN' ? warn : crit, 'consent:wrong-locale', en1);
   }
@@ -124,7 +124,7 @@ export function scoreForm(ctx, RULES) {
   if (!cv) recs.push('Добавить UF_CRM_CONSENT_VERSION');
   if (!ctx.hasVisitorId) recs.push('Добавить VisitorID (validator.js)');
   if (cv && sv && cv !== sv) recs.push('Свести версии консента и подписки');
-  if (lang !== 'en' && cv === 'EN_1') recs.push('Локализовать консент для ' + ctx.language);
+  if (RULES.requireConsentVersion && lang !== 'en' && cv === 'EN_1') recs.push('Локализовать консент для ' + ctx.language);
   if (!ctx.hasEmail) recs.push('Добавить обязательный Email');
   if (ctx.redirectIssue) recs.push('Исправить редирект: ' + ctx.redirectIssue);
   if ((ctx.presetIssues || []).length || ctx.presetIssuesCount) recs.push('Проверить значения preset');
