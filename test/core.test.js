@@ -2,11 +2,37 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { runPool } from '../core/api.js';
+import { applyEdit, editRisk, normalizeOperation, readEditValue } from '../core/editor.js';
 import { DEFAULT_REQUIREMENTS, makeValidator, scoreForm } from '../core/rules.js';
 import { analyze } from '../analyzers/analyze.js';
 import { buildSnapshot, diffSnapshots } from '../analyzers/diff.js';
 import { buildSheets, sheetsToXlsx, toJsonl } from '../analyzers/export.js';
 import XLSX from '../vendor/xlsx.full.min.js';
+
+test('editor validates, patches, and reads only supported form settings', function () {
+  var form = {
+    name: 'Old', data: { title: 'Title', buttonCaption: 'Send', fields: [
+      { name: 'CONTACT_EMAIL', visible: true, required: false }
+    ] },
+    presetFields: [{ fieldName: 'UF_CRM_CONSENT_VERSION', value: 'EN_1' }],
+    result: { success: { url: 'https://example.com/old' } }
+  };
+  var operation = normalizeOperation({
+    formId: 42, kind: 'preset', field: 'UF_CRM_CONSENT_VERSION', value: 'EN_2'
+  });
+  var patched = applyEdit(form, operation);
+  assert.equal(patched.before, 'EN_1');
+  assert.equal(readEditValue(patched.options, operation), 'EN_2');
+  assert.equal(form.presetFields[0].value, 'EN_1');
+  assert.equal(editRisk(operation), 'MEDIUM');
+
+  assert.throws(function () {
+    normalizeOperation({ formId: 42, kind: 'successUrl', value: 'http://example.com' });
+  }, /HTTPS/);
+  assert.throws(function () {
+    applyEdit(form, { formId: 42, kind: 'required', field: 'MISSING', value: true });
+  }, /отсутствует/);
+});
 
 test('preset rules and scoring report unsafe forms', function () {
   var validate = makeValidator({ UF_CRM_CONSENT: '^Y$' });

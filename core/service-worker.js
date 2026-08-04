@@ -5,14 +5,16 @@
    опциональный вебхук по CRIT. Прогресс шлётся в popup/report.
    ============================================================ */
 import { createApi, runPool, sleep } from './api.js';
-import { openDb, cacheGet, cacheSet, cacheKeys, deleteDb, HIST, META } from './cache.js';
+import { openDb, cacheGet, cacheSet, cacheKeys, cacheDelete, deleteDb, hashObj, HIST, META } from './cache.js';
 import { DEFAULT_PROFILES } from './rules.js';
+import { applyEdit, editRisk, normalizeOperation, readEditValue } from './editor.js';
 import { analyze } from '../analyzers/analyze.js';
 import { buildSnapshot, diffSnapshots } from '../analyzers/diff.js';
 import { buildSheets, sheetsToXlsx, toJsonl } from '../analyzers/export.js';
 import * as XLSX from '../vendor/xlsx.full.min.js';
 
 var running = false;
+var editing = false;
 var lastResult = null;
 
 function broadcast(msg) {
@@ -156,8 +158,157 @@ async function sendWebhook(url, A, profileName) {
   catch (e) { broadcast({ type: 'log', level: 'warn', text: 'Вебхук не отправлен: ' + e.message }); }
 }
 
+async function getFreshForm(apiCtx, id) {
+  var response = await apiCtx.apiRetry('crm.api.form.get', { id: id });
+  if (!response || response.status !== 'success' || !response.data || !response.data.data) {
+    throw new Error('Форма ' + id + ' не загрузилась');
+  }
+  return response.data;
+}
+
+function groupOperations(operations) {
+  var grouped = {};
+  (operations || []).forEach(function (operation) {
+    var normalized = normalizeOperation(operation);
+    (grouped[normalized.formId] = grouped[normalized.formId] || []).push(normalized);
+  });
+  if (!Object.keys(grouped).length) throw new Error('Не выбраны формы');
+  if (Object.keys(grouped).length > 100) throw new Error('За один раз можно изменить не более 100 форм');
+  return grouped;
+}
+
+async function previewEdits(operations) {
+  if (running || editing) throw new Error('Дождитесь завершения текущей операции');
+  editing = true;
+  try {
+    var grouped = groupOperations(operations);
+    var tab = await findCrmTab();
+    if (!tab) throw new Error('Откройте авторизованную вкладку Bitrix24');
+    var settings = await getSettings();
+    var apiCtx = createApi({ tabId: tab.tabId, sessid: tab.sessid, maxRetries: settings.maxRetries });
+    var entries = [];
+    var ids = Object.keys(grouped);
+    for (var i = 0; i < ids.length; i++) {
+      var id = ids[i];
+      var current = await getFreshForm(apiCtx, id);
+      var patched = current, changes = [];
+      grouped[id].forEach(function (operation) {
+        var result = applyEdit(patched, operation);
+        patched = result.options;
+        if (result.before === result.after) return;
+        changes.push({
+          kind: result.operation.kind, field: result.operation.field,
+          value: result.operation.value, before: result.before, after: result.after,
+          risk: editRisk(result.operation)
+        });
+      });
+      if (changes.length) entries.push({ id: id, fingerprint: hashObj(current), changes: changes });
+    }
+    if (!entries.length) throw new Error('Выбранные формы уже содержат это значение');
+    var plan = {
+      id: crypto.randomUUID(), createdAt: Date.now(), sourceHref: tab.href,
+      entries: entries, confirmation: 'APPLY ' + entries.length
+    };
+    await chrome.storage.local.set({ pendingEditPlan: plan });
+    return plan;
+  } finally { editing = false; }
+}
+
+async function appendAudit(record) {
+  var stored = await chrome.storage.local.get('editAudit');
+  var audit = stored.editAudit || [];
+  audit.unshift(record);
+  audit = audit.slice(0, 100);
+  await chrome.storage.local.set({ editAudit: audit });
+  return audit;
+}
+
+function auditChange(change) {
+  function short(value) { return typeof value === 'string' ? value.slice(0, 200) : value; }
+  return {
+    kind: change.kind, field: change.field, risk: change.risk,
+    before: short(change.before), after: short(change.after)
+  };
+}
+
+async function pruneBackups(db, audit) {
+  var keep = {};
+  audit.slice(0, 20).forEach(function (record) { keep[record.planId] = true; });
+  var keys = await cacheKeys(db, META);
+  for (var i = 0; i < keys.length; i++) {
+    var match = String(keys[i]).match(/^edit-backup:([^:]+):/);
+    if (match && !keep[match[1]]) await cacheDelete(db, keys[i], META);
+  }
+}
+
+async function applyEdits(planId, confirmation) {
+  if (running || editing) throw new Error('Дождитесь завершения текущей операции');
+  editing = true;
+  try {
+    var stored = await chrome.storage.local.get('pendingEditPlan');
+    var plan = stored.pendingEditPlan;
+    if (!plan || plan.id !== planId) throw new Error('План устарел. Создайте новый preview');
+    if (Date.now() - plan.createdAt > 15 * 60 * 1000) throw new Error('Preview старше 15 минут');
+    if (confirmation !== plan.confirmation) throw new Error('Неверная строка подтверждения');
+
+    var tab = await findCrmTab();
+    if (!tab) throw new Error('Откройте авторизованную вкладку Bitrix24');
+    var settings = await getSettings();
+    var apiCtx = createApi({ tabId: tab.tabId, sessid: tab.sessid, maxRetries: settings.maxRetries });
+    var db = await openDb();
+    var results = [];
+
+    for (var i = 0; i < plan.entries.length; i++) {
+      var entry = plan.entries[i], original = null, saveAttempted = false;
+      try {
+        original = await getFreshForm(apiCtx, entry.id);
+        if (hashObj(original) !== entry.fingerprint) throw new Error('Конфликт: форма изменилась после preview');
+        var patched = original;
+        entry.changes.forEach(function (change) {
+          patched = applyEdit(patched, {
+            formId: entry.id, kind: change.kind, field: change.field, value: change.value
+          }).options;
+        });
+        await cacheSet(db, 'edit-backup:' + plan.id + ':' + entry.id, original, META);
+        saveAttempted = true;
+        var saved = await apiCtx.apiRetry('crm.api.form.save', { options: patched });
+        if (!saved || saved.status !== 'success') throw new Error('Bitrix не подтвердил сохранение');
+        var verified = await getFreshForm(apiCtx, entry.id);
+        entry.changes.forEach(function (change) {
+          var actual = readEditValue(verified, {
+            formId: entry.id, kind: change.kind, field: change.field, value: change.value
+          });
+          if (actual !== change.after) throw new Error('Проверка после сохранения не пройдена');
+        });
+        await cacheSet(db, entry.id, verified);
+        results.push({
+          id: entry.id, status: 'applied',
+          changes: entry.changes.map(auditChange)
+        });
+      } catch (e) {
+        var rolledBack = false;
+        if (original && saveAttempted) {
+          try {
+            var restored = await apiCtx.apiRetry('crm.api.form.save', { options: original });
+            if (restored && restored.status === 'success') {
+              rolledBack = hashObj(await getFreshForm(apiCtx, entry.id)) === hashObj(original);
+            }
+          } catch (rollbackError) {}
+        }
+        results.push({ id: entry.id, status: rolledBack ? 'rolled_back' : 'failed', error: e.message });
+      }
+    }
+    var record = { planId: plan.id, appliedAt: new Date().toISOString(), results: results };
+    var audit = await appendAudit(record);
+    await pruneBackups(db, audit);
+    await chrome.storage.local.remove('pendingEditPlan');
+    broadcast({ type: 'editsDone', record: record });
+    return record;
+  } finally { editing = false; }
+}
+
 async function run(force) {
-  if (running) { broadcast({ type: 'log', text: 'Уже выполняется...' }); return; }
+  if (running || editing) { broadcast({ type: 'log', text: 'Уже выполняется...' }); return; }
   running = true;
   var tStart = Date.now();
   try {
@@ -245,6 +396,7 @@ async function run(force) {
       await cacheSet(db, stamp, lightSnap, HIST);
 
       var histKeys = (await cacheKeys(db, HIST)).sort();
+      while (histKeys.length > 30) await cacheDelete(db, histKeys.shift(), HIST);
       if (histKeys.length > 1) {
         var histData = {};
         for (var hi = 0; hi < histKeys.length; hi++) histData[histKeys[hi]] = await cacheGet(db, histKeys[hi], HIST);
@@ -294,6 +446,16 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   if (msg.type === 'resetCache') { deleteDb().then(function () { sendResponse({ ok: true }); }); return true; }
   if (msg.type === 'openReport') { chrome.tabs.create({ url: chrome.runtime.getURL('ui/report.html') }); sendResponse({ ok: true }); return true; }
   if (msg.type === 'status') { sendResponse({ running: running }); return true; }
+  if (msg.type === 'previewEdits') {
+    previewEdits(msg.operations).then(function (plan) { sendResponse({ ok: true, plan: plan }); })
+      .catch(function (e) { sendResponse({ ok: false, error: e.message }); });
+    return true;
+  }
+  if (msg.type === 'applyEdits') {
+    applyEdits(msg.planId, msg.confirmation).then(function (record) { sendResponse({ ok: true, record: record }); })
+      .catch(function (e) { sendResponse({ ok: false, error: e.message }); });
+    return true;
+  }
 });
 
 /* Плановый прогон (алармы) — если задан интервал в настройках. */
