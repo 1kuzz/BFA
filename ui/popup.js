@@ -17,9 +17,9 @@ $('opts').onclick = function (e) { e.preventDefault(); chrome.runtime.openOption
 
 // профили
 chrome.storage.local.get(['profiles', 'activeProfile'], function (d) {
-  var profiles = d.profiles || { Default: 1, LATAM: 1, RU: 1 };
+  var profiles = d.profiles || { Default: 1, RU: 1 };
   var sel = $('profile');
-  Object.keys(profiles).forEach(function (name) {
+  Object.keys(profiles).filter(function (name) { return name.toUpperCase() !== 'LATAM'; }).forEach(function (name) {
     var o = document.createElement('option'); o.value = name; o.textContent = name;
     if (name === (d.activeProfile || 'Default')) o.selected = true;
     sel.appendChild(o);

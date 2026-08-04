@@ -1,0 +1,26 @@
+:root {
+  color-scheme: dark;
+  --brand:#10b981; --brand-strong:#0f766e; --bg:#07111f; --panel:#111c2f;
+  --panel-soft:#0a1626; --line:#2a3952; --text:#dbeafe; --muted:#9fb2cc;
+  --crit:#fb7185; --warn:#fbbf24; --info:#60a5fa;
+  --radius-sm:8px; --radius:12px; --radius-lg:16px;
+  --shadow:0 12px 36px rgba(0,0,0,.22); --ease:160ms ease;
+}
+* { box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:Inter,ui-sans-serif,-apple-system,Segoe UI,Arial,sans-serif; }
+button,input,select,textarea { font:inherit; transition:border-color var(--ease),background var(--ease),transform var(--ease),opacity var(--ease); }
+input,select,textarea { color:var(--text); background:var(--panel-soft); border:1px solid var(--line); border-radius:var(--radius-sm); }
+body input[type=text],body input[type=number],body input[type=url],body select,body textarea { color:var(--text); background:var(--panel-soft); border-color:var(--line); }
+button { border-radius:var(--radius-sm); background:var(--brand-strong); color:#fff; }
+button:not(:disabled):hover { filter:brightness(1.12); transform:translateY(-1px); }
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible { outline:2px solid var(--brand); outline-offset:2px; }
+.hint,.sub,.meta { color:var(--muted); }
+body button.ghost { background:var(--panel); color:#6ee7b7; border-color:#256e67; }
+body .stat,body #log { background:var(--panel); color:var(--text); border-color:var(--line); box-shadow:var(--shadow); }
+.empty-state { border:1px dashed var(--line); border-radius:var(--radius-lg); padding:42px 24px; text-align:center; color:var(--muted); background:var(--panel-soft); }
+.empty-state::before { content:'◇'; display:block; color:var(--brand); font-size:30px; margin-bottom:8px; }
+.skeleton { border-radius:var(--radius); background:linear-gradient(90deg,var(--panel) 25%,#1b2b43 50%,var(--panel) 75%); background-size:200% 100%; animation:shimmer 1.2s infinite; }
+.toast { position:fixed; right:22px; bottom:22px; z-index:20; max-width:360px; padding:11px 14px; border:1px solid #256e67; border-radius:var(--radius); background:#102b2d; box-shadow:var(--shadow); animation:toast-in var(--ease); }
+@keyframes shimmer { to { background-position:-200% 0; } }
+@keyframes toast-in { from { opacity:0; transform:translateY(8px); } }
+@media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important; transition:none!important; } }

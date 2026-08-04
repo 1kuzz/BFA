@@ -8,6 +8,7 @@ import { createApi, runPool, sleep } from './api.js';
 import { openDb, cacheGet, cacheSet, cacheKeys, cacheDelete, deleteDb, hashObj, HIST, META } from './cache.js';
 import { DEFAULT_PROFILES } from './rules.js';
 import { acceptsCrmUrl, crmScope } from './scope.js';
+import { shouldExcludeForm } from './filter.js';
 import { applyEdit, editRisk, normalizeOperation, readEditValue } from './editor.js';
 import { analyze } from '../analyzers/analyze.js';
 import { buildSnapshot, diffSnapshots } from '../analyzers/diff.js';
@@ -26,8 +27,15 @@ async function getSettings() {
   var d = await chrome.storage.local.get(['settings', 'profiles', 'activeProfile']);
   var settings = d.settings || {};
   var profiles = d.profiles || DEFAULT_PROFILES;
-  var activeProfile = d.activeProfile || 'Default';
+  var activeProfile = String(d.activeProfile || 'Default').toUpperCase() === 'LATAM' ? 'Default' : (d.activeProfile || 'Default');
   var profile = profiles[activeProfile] || DEFAULT_PROFILES.Default;
+  var base = DEFAULT_PROFILES[activeProfile] || DEFAULT_PROFILES.Default;
+  var presetRules = Object.assign({}, base.presetRules, profile.presetRules || {});
+  if (activeProfile === 'RU') {
+    ['UF_CRM_CONSENT_VERSION', 'UF_CRM_SUBSCRIPTION_VERSION'].forEach(function (field) {
+      if (presetRules[field] === DEFAULT_PROFILES.Default.presetRules[field]) presetRules[field] = base.presetRules[field];
+    });
+  }
   return {
     concurrency: settings.concurrency || 4,
     useCache: settings.useCache !== false,
@@ -36,8 +44,9 @@ async function getSettings() {
     maxRetries: settings.maxRetries || 8,
     webhookUrl: settings.webhookUrl || '',
     profileName: activeProfile,
-    requirements: profile.requirements,
-    presetRules: profile.presetRules
+    requirements: Object.assign({}, base.requirements, profile.requirements || {}),
+    presetRules: presetRules,
+    exclusions: profile.exclusions || base.exclusions || { languages: [], regions: [] }
   };
 }
 
@@ -171,7 +180,7 @@ function groupOperations(operations) {
     (grouped[normalized.formId] = grouped[normalized.formId] || []).push(normalized);
   });
   if (!Object.keys(grouped).length) throw new Error('Не выбраны формы');
-  if (Object.keys(grouped).length > 100) throw new Error('За один раз можно изменить не более 100 форм');
+  if (Object.keys(grouped).length > 1000) throw new Error('За один раз можно изменить не более 1000 форм');
   return grouped;
 }
 
@@ -186,8 +195,8 @@ async function previewEdits(operations) {
     var apiCtx = createApi({ tabId: tab.tabId, sessid: tab.sessid, maxRetries: settings.maxRetries });
     var entries = [];
     var ids = Object.keys(grouped);
-    for (var i = 0; i < ids.length; i++) {
-      var id = ids[i];
+    broadcast({ type: 'status', phase: 'preview', text: 'Проверяю выбранные формы...', done: 0, total: ids.length });
+    await runPool(ids, settings.concurrency, async function (id) {
       var current = await getFreshForm(apiCtx, id);
       var patched = current, changes = [];
       grouped[id].forEach(function (operation) {
@@ -201,7 +210,10 @@ async function previewEdits(operations) {
         });
       });
       if (changes.length) entries.push({ id: id, fingerprint: hashObj(current), changes: changes });
-    }
+    }, function (done, total) {
+      if (done % 10 === 0 || done === total) broadcast({ type: 'progress', done: done, total: total });
+    });
+    entries.sort(function (a, b) { return parseInt(a.id) - parseInt(b.id); });
     if (!entries.length) throw new Error('Выбранные формы уже содержат это значение');
     var plan = {
       id: crypto.randomUUID(), createdAt: Date.now(), sourceHref: tab.href,
@@ -337,14 +349,20 @@ async function run(force) {
 
     // 1) список форм
     broadcast({ type: 'status', phase: 'list', text: 'Собираю список форм...' });
-    var t0 = Date.now(), ids = [], seen = {}, page = 1;
+    var t0 = Date.now(), ids = [], seen = {}, page = 1, excludedEarly = 0, excludedLate = 0;
     while (page <= 200) {
       var lr = await apiCtx.apiRetry('crm.api.form.list', { navigation: { iNumPage: page, nPageSize: 50 } });
       var items = (lr && lr.data && (lr.data.items || lr.data.forms || lr.data.list)) || (Array.isArray(lr && lr.data) ? lr.data : null);
       if (!items || !items.length) break;
-      var added = 0;
-      items.forEach(function (f) { var id = f.id != null ? f.id : f.ID; if (id != null && !seen[id]) { seen[id] = 1; ids.push(String(id)); added++; } });
-      if (added === 0) break; page++; await sleep(120);
+      var discovered = 0;
+      items.forEach(function (f) {
+        var id = f.id != null ? f.id : f.ID;
+        if (id == null || seen[id]) return;
+        seen[id] = 1; discovered++;
+        if (shouldExcludeForm(f, S.exclusions)) { excludedEarly++; return; }
+        ids.push(String(id));
+      });
+      if (discovered === 0) break; page++; await sleep(120);
     }
     perf.listTime = Date.now() - t0;
     broadcast({ type: 'log', text: 'Форм найдено: ' + ids.length + ' за ' + perf.listTime + 'мс' });
@@ -369,7 +387,12 @@ async function run(force) {
     await runPool(ids, S.concurrency, fetchForm, function (done, total) {
       if (done % 10 === 0 || done === total) broadcast({ type: 'progress', done: done, total: total });
     });
+    Object.keys(raw).forEach(function (id) {
+      if (shouldExcludeForm(raw[id], S.exclusions)) { delete raw[id]; excludedLate++; }
+    });
     broadcast({ type: 'log', text: 'Разобрано: ' + Object.keys(raw).length + ', ошибок: ' + fails.length });
+    if (excludedEarly + excludedLate)
+      broadcast({ type: 'log', text: 'Исключено профилем: ' + (excludedEarly + excludedLate) });
 
     // 3) анализ
     broadcast({ type: 'status', phase: 'analyze', text: 'Анализирую...' });
@@ -385,11 +408,12 @@ async function run(force) {
       apiCalls: perf.apiCalls, cacheHits: perf.cacheHits, cacheHitPct: ids.length ? Math.round(perf.cacheHits * 1000 / ids.length) / 10 : 0,
       retries: perf.retries, retryPct: perf.apiCalls ? Math.round(perf.retries * 1000 / perf.apiCalls) / 10 : 0,
       http429: perf.http429, http500: perf.http500, http503: perf.http503, maxBackoffMs: perf.maxBackoffMs,
-      errors: perf.errors, totalSec: Math.round((Date.now() - tStart) / 1000)
+      errors: perf.errors, excludedForms: excludedEarly + excludedLate,
+      totalSec: Math.round((Date.now() - tStart) / 1000)
     };
 
     // 5) дифф + история
-    var diffChanges = [], timelineRows = [];
+    var diffChanges = [], timelineRows = [], historyStats = [];
     if (S.useCache && db) {
       var SNAP_KEY = '__snapshot__', SNAP_VER = 'v5';
       var prevWrap = await cacheGet(db, SNAP_KEY, META);
@@ -399,14 +423,23 @@ async function run(force) {
       await cacheSet(db, SNAP_KEY, { ver: SNAP_VER, data: curSnap }, META);
 
       var stamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
-      var lightSnap = {}; A.rows.forEach(function (r) { lightSnap[r.id] = { s: r.severity, cv: r.consentVersion }; });
+      var lightSnap = {}; A.rows.forEach(function (r) { lightSnap[r.id] = { s: r.severity, cv: r.consentVersion, q: r.score }; });
       await cacheSet(db, stamp, lightSnap, HIST);
 
       var histKeys = (await cacheKeys(db, HIST)).sort();
       while (histKeys.length > 30) await cacheDelete(db, histKeys.shift(), HIST);
+      var histData = {};
+      for (var hi = 0; hi < histKeys.length; hi++) histData[histKeys[hi]] = await cacheGet(db, histKeys[hi], HIST);
+      historyStats = histKeys.map(function (key) {
+        var stats = { at: key, CRIT: 0, WARN: 0, INFO: 0, OK: 0, avgScore: null }, scores = [];
+        Object.keys(histData[key] || {}).forEach(function (id) {
+          var item = histData[key][id]; stats[item.s] = (stats[item.s] || 0) + 1;
+          if (typeof item.q === 'number') scores.push(item.q);
+        });
+        if (scores.length) stats.avgScore = Math.round(scores.reduce(function (a, b) { return a + b; }, 0) / scores.length);
+        return stats;
+      });
       if (histKeys.length > 1) {
-        var histData = {};
-        for (var hi = 0; hi < histKeys.length; hi++) histData[histKeys[hi]] = await cacheGet(db, histKeys[hi], HIST);
         var allFormIds = {}; histKeys.forEach(function (k) { Object.keys(histData[k] || {}).forEach(function (id) { allFormIds[id] = 1; }); });
         Object.keys(allFormIds).forEach(function (id) {
           var seq = histKeys.map(function (k) { var v = (histData[k] || {})[id]; return v ? v.s + '/' + (v.cv || '—') : '—'; });
@@ -433,7 +466,7 @@ async function run(force) {
       clusters: A.clusters, anomalies: A.anomalies, consistency: A.consistency,
       agrConflicts: A.agrConflicts, presetIssuesAll: A.presetIssuesAll,
       expectedConsent: A.expectedConsent, fieldUsage: A.fieldUsage,
-      perfStats: perfStats, diffChanges: diffChanges, timelineRows: timelineRows,
+      perfStats: perfStats, diffChanges: diffChanges, timelineRows: timelineRows, historyStats: historyStats,
       fails: fails
     };
     await chrome.storage.local.set({ lastResult: lastResult });

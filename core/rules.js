@@ -2,7 +2,7 @@
    Движок правил. Всё, что в оригинале было захардкожено
    (PRESET_RULES, severity-логика, требования), вынесено сюда
    и управляется профилями. Профиль = именованный набор
-   requirements + preset-паттернов. Регионы LATAM/META/EMEA/RU
+   requirements + preset-паттернов. Инстансы META/EMEA/RU
    могут иметь разные требования к консенту.
    ============================================================ */
 
@@ -12,7 +12,9 @@ export var DEFAULT_REQUIREMENTS = {
   requireEmail: true,
   requireCaptcha: false,
   requireConsentVersion: true,
-  requireHttpsRedirect: true
+  requireHttpsRedirect: true,
+  invalidConsentVersionPatterns: ['^test$', '^ex_', '^EN_2$'],
+  nonEnglishEn1Severity: 'CRIT'
 };
 
 /* Паттерны preset-значений. Ключ regexp хранится строкой,
@@ -31,14 +33,23 @@ export var DEFAULT_PRESET_RULES = {
 };
 
 export var DEFAULT_PROFILES = {
-  'Default': { requirements: DEFAULT_REQUIREMENTS, presetRules: DEFAULT_PRESET_RULES },
-  'LATAM': {
-    requirements: Object.assign({}, DEFAULT_REQUIREMENTS, { requireMarketoId: true }),
-    presetRules: DEFAULT_PRESET_RULES
+  'Default': {
+    requirements: Object.assign({}, DEFAULT_REQUIREMENTS, {
+      invalidConsentVersionPatterns: DEFAULT_REQUIREMENTS.invalidConsentVersionPatterns.slice()
+    }),
+    presetRules: Object.assign({}, DEFAULT_PRESET_RULES),
+    exclusions: { languages: ['la'], regions: ['Americas'] }
   },
   'RU': {
-    requirements: Object.assign({}, DEFAULT_REQUIREMENTS, { requireCaptcha: true }),
-    presetRules: DEFAULT_PRESET_RULES
+    requirements: Object.assign({}, DEFAULT_REQUIREMENTS, {
+      requireCaptcha: true,
+      invalidConsentVersionPatterns: DEFAULT_REQUIREMENTS.invalidConsentVersionPatterns.slice()
+    }),
+    presetRules: Object.assign({}, DEFAULT_PRESET_RULES, {
+      'UF_CRM_CONSENT_VERSION': '^(?:[Bb][Tt][Xx]|[Rr][Uu](?: [A-Za-zА-Яа-я0-9]+)+) [Vv]\\d+$',
+      'UF_CRM_SUBSCRIPTION_VERSION': '^(?:[Bb][Tt][Xx]|[Rr][Uu](?: [A-Za-zА-Яа-я0-9]+)+) [Vv]\\d+$'
+    }),
+    exclusions: { languages: [], regions: [] }
   }
 };
 
@@ -63,25 +74,49 @@ export function makeValidator(presetRules) {
 /* Оценка severity формы по требованиям профиля.
    Возвращает {severity, crit[], warn[], info[], recommendations[], score}. */
 export function scoreForm(ctx, RULES) {
-  var crit = [], warn = [], info = [], recs = [];
+  RULES = RULES || DEFAULT_REQUIREMENTS;
+  var crit = [], warn = [], info = [], recs = [], seen = {};
   var cv = ctx.consentVersion, sv = ctx.subscriptionVersion;
+  ctx.redirectIssue = ctx.redirectIssue || '';
   var lang = (ctx.language || '').toLowerCase();
+  function add(list, key, text) {
+    if (!seen[key]) { seen[key] = true; list.push(text); }
+  }
 
-  if (RULES.requireConsentVersion && !cv) crit.push('нет версии консента');
-  if (cv && sv && cv !== sv) crit.push('консент(' + cv + ') != подписка(' + sv + ')');
-  if (cv && (cv.toLowerCase() === 'test' || cv.toLowerCase().indexOf('btx') > -1 ||
-             cv.indexOf('ex_') === 0 || cv === 'EN_2')) crit.push('нестандартная версия: ' + cv);
-  if (RULES.requireEmail && !ctx.hasEmail) crit.push('нет поля Email');
+  if (RULES.requireConsentVersion && !cv) add(crit, 'consent:missing', 'нет версии консента');
+  if (cv && sv && cv !== sv) add(crit, 'consent:mismatch', 'консент(' + cv + ') != подписка(' + sv + ')');
+  (RULES.invalidConsentVersionPatterns || []).some(function (pattern) {
+    try {
+      if (cv && new RegExp(pattern, 'i').test(cv)) {
+        add(crit, 'preset:UF_CRM_CONSENT_VERSION', 'нестандартная версия: ' + cv);
+        return true;
+      }
+    } catch (e) { /* bad custom regexp is ignored */ }
+    return false;
+  });
+  (ctx.presetIssues || []).forEach(function (issue) {
+    add(crit, 'preset:' + issue.field, 'невалидный preset ' + issue.field + ': ' + issue.value);
+  });
+  if (!ctx.presetIssues && ctx.presetIssuesCount)
+    add(crit, 'preset:legacy', 'невалидные preset: ' + ctx.presetIssuesCount);
+  (ctx.agreementConflicts || []).forEach(function (conflict) {
+    add(crit, 'agreement:' + conflict.id,
+      'конфликт текста соглашения ' + conflict.id + ': ' + conflict.variants + ' вариантов');
+  });
+  if (RULES.requireEmail && !ctx.hasEmail) add(crit, 'field:email', 'нет поля Email');
   if (RULES.requireHttpsRedirect && ctx.redirectIssue.indexOf('HTTP') > -1)
-    crit.push('небезопасный редирект: ' + ctx.redirectIssue);
-  if (ctx.presetIssuesCount) crit.push('невалидные preset: ' + ctx.presetIssuesCount);
+    add(crit, 'redirect:http', 'небезопасный редирект: ' + ctx.redirectIssue);
 
-  if (lang !== 'en' && lang !== '' && cv === 'EN_1') warn.push('консент EN_1 на локали ' + ctx.language);
-  if (ctx.redirectIssue && ctx.redirectIssue.indexOf('HTTP') === -1) warn.push('редирект: ' + ctx.redirectIssue);
-  if (RULES.requireCaptcha && ctx.captcha === 'N') warn.push('нет captcha');
+  if (lang !== 'en' && lang !== '' && cv === 'EN_1') {
+    var en1 = 'консент EN_1 на локали ' + ctx.language;
+    add(RULES.nonEnglishEn1Severity === 'WARN' ? warn : crit, 'consent:wrong-locale', en1);
+  }
+  if (ctx.redirectIssue && ctx.redirectIssue.indexOf('HTTP') === -1)
+    add(warn, 'redirect:other', 'редирект: ' + ctx.redirectIssue);
+  if (RULES.requireCaptcha && ctx.captcha === 'N') add(warn, 'captcha:missing', 'нет captcha');
 
-  if (RULES.requireVisitorId && !ctx.hasVisitorId) info.push('нет VisitorID');
-  if (RULES.requireMarketoId && !ctx.hasMarketoId) info.push('нет Marketo ID');
+  if (RULES.requireVisitorId && !ctx.hasVisitorId) add(info, 'field:visitor', 'нет VisitorID');
+  if (RULES.requireMarketoId && !ctx.hasMarketoId) add(info, 'field:marketo', 'нет Marketo ID');
 
   if (!cv) recs.push('Добавить UF_CRM_CONSENT_VERSION');
   if (!ctx.hasVisitorId) recs.push('Добавить VisitorID (validator.js)');
@@ -89,7 +124,7 @@ export function scoreForm(ctx, RULES) {
   if (lang !== 'en' && cv === 'EN_1') recs.push('Локализовать консент для ' + ctx.language);
   if (!ctx.hasEmail) recs.push('Добавить обязательный Email');
   if (ctx.redirectIssue) recs.push('Исправить редирект: ' + ctx.redirectIssue);
-  if (ctx.presetIssuesCount) recs.push('Проверить значения preset');
+  if ((ctx.presetIssues || []).length || ctx.presetIssuesCount) recs.push('Проверить значения preset');
 
   var severity = crit.length ? 'CRIT' : (warn.length ? 'WARN' : (info.length ? 'INFO' : 'OK'));
 

@@ -52,7 +52,10 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
       pmap[p.fieldName] = clean(p.value); pnames.push(p.fieldName);
       presetAll[p.fieldName] = (presetAll[p.fieldName] || 0) + 1;
       var v = validatePreset(p.fieldName, clean(p.value));
-      if (v) { presetIssues.push(p.fieldName + ': ' + v); presetIssuesAll.push({ id: id, field: p.fieldName, value: clean(p.value), issue: v }); }
+      if (v) {
+        var issue = { id: id, field: p.fieldName, value: clean(p.value), issue: v };
+        presetIssues.push(issue); presetIssuesAll.push(issue);
+      }
     });
 
     var res = top.result || {}, succ = res.success || {};
@@ -83,13 +86,13 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
         redirectIssue = (redirectIssue ? redirectIssue + '; ' : '') + 'dev/staging домен';
     }
 
-    var scored = scoreForm({
+    var scoreContext = {
       consentVersion: cv, subscriptionVersion: sv, language: lang,
       hasEmail: hasField('EMAIL'), redirectIssue: redirectIssue,
-      presetIssuesCount: presetIssues.length, captcha: capOn,
+      presetIssues: presetIssues, captcha: capOn,
       hasVisitorId: pnames.indexOf('UF_CRM_VISITOR_ID') > -1,
       hasMarketoId: pnames.indexOf('UF_CRM_MARKETO_FORM_ID') > -1
-    }, RULES);
+    };
 
     var utm = ['SOURCE', 'MEDIUM', 'CAMPAIGN', 'CONTENT', 'TERM'].map(function (u) { return pmap['UF_CRM_UTM_' + u] || ''; });
 
@@ -100,6 +103,7 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
       questions: questions,
       requiredFields: visible.filter(function (f) { return f.required; }).map(function (f) { return f.name; }).join(', '),
       presetCount: preset.length, consentVersion: cv, subscriptionVersion: sv,
+      presetSignature: preset.map(function (p) { return p.fieldName + '=' + clean(p.value); }).sort().join('|'),
       hasVisitorId: pnames.indexOf('UF_CRM_VISITOR_ID') > -1 ? 'Y' : 'N',
       hasMarketoId: pnames.indexOf('UF_CRM_MARKETO_FORM_ID') > -1 ? 'Y' : 'N',
       captcha: capOn, callback: callbackOn, whatsapp: whatsappOn, integration: integrationN, payment: paymentOn,
@@ -110,11 +114,31 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
       utmCount: utm.filter(function (x) { return x; }).length,
       agreementIds: (d.agreements || []).map(function (a) { return a.id; }).join(', '),
       redirect: redirect, redirectIssue: redirectIssue, redirectDelay: clean(res.redirectDelay), successText: clean(succ.text),
-      presetIssues: presetIssues.join(' ; '),
-      severity: scored.severity, score: scored.score,
-      crit: scored.crit.join(' ; '), warn: scored.warn.join(' ; '), info: scored.info.join(' ; '),
-      recommendations: scored.recommendations.join(' ; ')
+      presetIssues: presetIssues.map(function (x) { return x.field + ': ' + x.issue; }).join(' ; '),
+      _scoreContext: scoreContext
     });
+  });
+
+  // Один Agreement ID с разными текстами — юридический конфликт каждой затронутой формы.
+  var agrConflicts = [], conflictsByForm = {};
+  Object.keys(agreements).forEach(function (aid) {
+    var agreement = agreements[aid], txts = Object.keys(agreement.texts);
+    if (txts.length < 2) return;
+    var formIds = Array.from(new Set(agreement.forms));
+    var conflict = { id: aid, name: agreement.name, variants: txts.length, forms: formIds.length, formIds: formIds };
+    agrConflicts.push(conflict);
+    conflict.formIds.forEach(function (formId) {
+      (conflictsByForm[formId] = conflictsByForm[formId] || []).push(conflict);
+    });
+  });
+
+  rows.forEach(function (row) {
+    row._scoreContext.agreementConflicts = conflictsByForm[row.id] || [];
+    var scored = scoreForm(row._scoreContext, RULES);
+    row.severity = scored.severity; row.score = scored.score;
+    row.crit = scored.crit.join(' ; '); row.warn = scored.warn.join(' ; ');
+    row.info = scored.info.join(' ; '); row.recommendations = scored.recommendations.join(' ; ');
+    delete row._scoreContext;
   });
 
   var order = { CRIT: 0, WARN: 1, INFO: 2, OK: 3 };
@@ -146,7 +170,32 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
           if (jaccard(sf, of) >= DUP_TH) { cl.push(other); used[other] = 1; }
         }
       });
-      if (cl.length > 1) clusters.push({ lang: l, size: cl.length, ids: cl, exact: new Set(cl.map(function (i) { return rowById[i].visibleFields; })).size === 1 });
+      if (cl.length > 1) {
+        var exact = new Set(cl.map(function (i) { return rowById[i].visibleFields; })).size === 1;
+        var category = 'near_duplicate', differences = 'поля';
+        if (exact) {
+          var settingsKeys = ['successText', 'buttonCaption', 'theme', 'captcha', 'callback', 'whatsapp',
+            'integration', 'payment', 'entity', 'requiredFields', 'presetSignature', 'agreementIds', 'dedupe', 'responsible'];
+          var redirects = new Set(cl.map(function (i) { return rowById[i].redirect; }));
+          var settings = new Set(cl.map(function (i) {
+            var r = rowById[i]; return settingsKeys.map(function (key) { return r[key]; }).join('\u001f');
+          }));
+          if (redirects.size === 1 && settings.size === 1) {
+            category = 'full_duplicate'; differences = 'нет';
+          } else if (redirects.size > 1 && settings.size === 1) {
+            category = 'redirect_only'; differences = 'redirect/landing';
+          } else {
+            category = 'field_variant';
+            var changed = [];
+            if (redirects.size > 1) changed.push('redirect');
+            settingsKeys.forEach(function (key) {
+              if (new Set(cl.map(function (i) { return rowById[i][key]; })).size > 1) changed.push(key);
+            });
+            differences = changed.join(', ');
+          }
+        }
+        clusters.push({ lang: l, size: cl.length, ids: cl, exact: exact, category: category, differences: differences });
+      }
     });
   });
   clusters.sort(function (a, b) { return b.size - a.size; });
@@ -176,13 +225,6 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
       });
       if (pr > 0 && rq > 0 && rq < pr) consistency.push({ formType: t, field: field, present: pr, required: rq, note: 'обязательное в ' + rq + ' из ' + pr });
     });
-  });
-
-  // конфликты соглашений
-  var agrConflicts = [];
-  Object.keys(agreements).forEach(function (aid) {
-    var txts = Object.keys(agreements[aid].texts);
-    if (txts.length > 1) agrConflicts.push({ id: aid, name: agreements[aid].name, variants: txts.length, forms: agreements[aid].forms.length });
   });
 
   var sevCount = { CRIT: 0, WARN: 0, INFO: 0, OK: 0 };

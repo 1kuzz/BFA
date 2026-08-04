@@ -2,7 +2,8 @@ var $ = function (id) { return document.getElementById(id); };
 
 var DEFAULT_REQ = {
   requireVisitorId: true, requireMarketoId: false, requireEmail: true,
-  requireCaptcha: false, requireConsentVersion: true, requireHttpsRedirect: true
+  requireCaptcha: false, requireConsentVersion: true, requireHttpsRedirect: true,
+  invalidConsentVersionPatterns: ['^test$', '^ex_', '^EN_2$'], nonEnglishEn1Severity: 'CRIT'
 };
 var DEFAULT_PRESET = {
   'UF_CRM_CONSENT': '^Y$', 'UF_CRM_SUBSCRIPTION': '^Y$',
@@ -13,18 +14,29 @@ var DEFAULT_PRESET = {
   'UF_CRM_VISITOR_ID': '%UF_VISITOR_ID%', 'UF_CRM_FORM_NAME': '%crm_form_name%', 'UF_CRM_BITRIX_FORM_ID': '%crm_form_id%'
 };
 var DEFAULT_PROFILES = {
-  'Default': { requirements: DEFAULT_REQ, presetRules: DEFAULT_PRESET },
-  'LATAM': { requirements: Object.assign({}, DEFAULT_REQ, { requireMarketoId: true }), presetRules: DEFAULT_PRESET },
-  'RU': { requirements: Object.assign({}, DEFAULT_REQ, { requireCaptcha: true }), presetRules: DEFAULT_PRESET }
+  'Default': {
+    requirements: Object.assign({}, DEFAULT_REQ, { invalidConsentVersionPatterns: DEFAULT_REQ.invalidConsentVersionPatterns.slice() }), presetRules: Object.assign({}, DEFAULT_PRESET),
+    exclusions: { languages: ['la'], regions: ['Americas'] }
+  },
+  'RU': {
+    requirements: Object.assign({}, DEFAULT_REQ, { requireCaptcha: true, invalidConsentVersionPatterns: DEFAULT_REQ.invalidConsentVersionPatterns.slice() }),
+    presetRules: Object.assign({}, DEFAULT_PRESET, {
+      'UF_CRM_CONSENT_VERSION': '^(?:[Bb][Tt][Xx]|[Rr][Uu](?: [A-Za-zА-Яа-я0-9]+)+) [Vv]\\d+$',
+      'UF_CRM_SUBSCRIPTION_VERSION': '^(?:[Bb][Tt][Xx]|[Rr][Uu](?: [A-Za-zА-Яа-я0-9]+)+) [Vv]\\d+$'
+    }),
+    exclusions: { languages: [], regions: [] }
+  }
 };
 
 var REQ_KEYS = ['requireConsentVersion', 'requireEmail', 'requireHttpsRedirect', 'requireCaptcha', 'requireVisitorId', 'requireMarketoId'];
 var state = { profiles: null, active: 'Default', settings: {} };
 
 function loadProfileIntoForm(name) {
-  var p = state.profiles[name] || DEFAULT_PROFILES.Default;
+  var p = state.profiles[name] || DEFAULT_PROFILES.Default, exclusions = p.exclusions || {};
   REQ_KEYS.forEach(function (k) { $(k).checked = !!(p.requirements || {})[k]; });
   $('presetRules').value = JSON.stringify(p.presetRules || {}, null, 2);
+  $('excludeLanguages').value = (exclusions.languages || []).join(', ');
+  $('excludeRegions').value = (exclusions.regions || []).join(', ');
 }
 
 function readProfileFromForm() {
@@ -41,7 +53,13 @@ function readProfileFromForm() {
       new RegExp(presetRules[key]);
     });
   } catch (e) { alert('Ошибка в regex preset-паттернов: ' + e.message); return null; }
-  return { requirements: req, presetRules: presetRules };
+  req.invalidConsentVersionPatterns = (state.profiles[state.active].requirements || {}).invalidConsentVersionPatterns || DEFAULT_REQ.invalidConsentVersionPatterns.slice();
+  req.nonEnglishEn1Severity = (state.profiles[state.active].requirements || {}).nonEnglishEn1Severity || 'CRIT';
+  function csv(id) { return $(id).value.split(',').map(function (x) { return x.trim(); }).filter(Boolean); }
+  return {
+    requirements: req, presetRules: presetRules,
+    exclusions: { languages: csv('excludeLanguages'), regions: csv('excludeRegions') }
+  };
 }
 
 function renderProfileList() {
@@ -55,8 +73,25 @@ function renderProfileList() {
 
 chrome.storage.local.get(['settings', 'profiles', 'activeProfile'], function (d) {
   state.settings = d.settings || {};
-  state.profiles = d.profiles || DEFAULT_PROFILES;
-  state.active = d.activeProfile || 'Default';
+  state.profiles = d.profiles || JSON.parse(JSON.stringify(DEFAULT_PROFILES));
+  Object.keys(state.profiles).forEach(function (name) {
+    if (name.toUpperCase() === 'LATAM') delete state.profiles[name];
+  });
+  ['Default', 'RU'].forEach(function (name) {
+    if (!state.profiles[name]) state.profiles[name] = JSON.parse(JSON.stringify(DEFAULT_PROFILES[name]));
+  });
+  var ru = state.profiles.RU;
+  ['UF_CRM_CONSENT_VERSION', 'UF_CRM_SUBSCRIPTION_VERSION'].forEach(function (field) {
+    if (!ru.presetRules || ru.presetRules[field] === DEFAULT_PRESET[field]) {
+      ru.presetRules = Object.assign({}, ru.presetRules || {});
+      ru.presetRules[field] = DEFAULT_PROFILES.RU.presetRules[field];
+    }
+  });
+  ru.requirements = Object.assign({}, DEFAULT_REQ, ru.requirements || {});
+  ru.exclusions = ru.exclusions || { languages: [], regions: [] };
+  state.profiles.Default.requirements = Object.assign({}, DEFAULT_REQ, state.profiles.Default.requirements || {});
+  state.profiles.Default.exclusions = state.profiles.Default.exclusions || { languages: ['la'], regions: ['Americas'] };
+  state.active = state.profiles[d.activeProfile] ? d.activeProfile : 'Default';
 
   renderProfileList();
   loadProfileIntoForm(state.active);
@@ -82,7 +117,12 @@ $('profileSel').onchange = function () {
 $('newProfile').onclick = function () {
   var name = prompt('Имя нового профиля (например META или EMEA):');
   if (!name) return;
-  state.profiles[name] = { requirements: Object.assign({}, DEFAULT_REQ), presetRules: DEFAULT_PRESET };
+  if (name.trim().toUpperCase() === 'LATAM') { alert('LATAM исключён из анализа. Используйте профиль EU/Global с настройками исключений.'); return; }
+  name = name.trim();
+  state.profiles[name] = {
+    requirements: Object.assign({}, DEFAULT_REQ), presetRules: Object.assign({}, DEFAULT_PRESET),
+    exclusions: { languages: [], regions: [] }
+  };
   state.active = name;
   renderProfileList();
   loadProfileIntoForm(name);

@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 
 import { runPool } from '../core/api.js';
 import { applyEdit, editRisk, normalizeOperation, readEditValue } from '../core/editor.js';
-import { DEFAULT_REQUIREMENTS, makeValidator, scoreForm } from '../core/rules.js';
+import { DEFAULT_PROFILES, DEFAULT_REQUIREMENTS, makeValidator, scoreForm } from '../core/rules.js';
 import { acceptsCrmHost, acceptsCrmUrl, crmScope } from '../core/scope.js';
+import { shouldExcludeForm } from '../core/filter.js';
 import { analyze } from '../analyzers/analyze.js';
 import { buildSnapshot, diffSnapshots } from '../analyzers/diff.js';
 import { buildSheets, sheetsToXlsx, toJsonl } from '../analyzers/export.js';
@@ -64,6 +65,46 @@ test('preset rules and scoring report unsafe forms', function () {
   }, DEFAULT_REQUIREMENTS);
   assert.equal(result.severity, 'CRIT');
   assert.equal(result.score, 22);
+
+  var ruValidate = makeValidator(DEFAULT_PROFILES.RU.presetRules);
+  assert.equal(ruValidate('UF_CRM_CONSENT_VERSION', 'BTX v1'), null);
+  assert.equal(ruValidate('UF_CRM_CONSENT_VERSION', 'RU EULA v1'), null);
+  var ruScore = scoreForm({
+    consentVersion: 'BTX v1', subscriptionVersion: 'BTX v1', language: 'ru', hasEmail: true,
+    redirectIssue: '', presetIssues: [], captcha: 'Y', hasVisitorId: true, hasMarketoId: false
+  }, DEFAULT_PROFILES.RU.requirements);
+  assert.equal(ruScore.severity, 'OK');
+  var ruAnalysis = analyze({ '7': {
+    name: 'RU_ru_Download', data: {
+      language: 'ru', fields: [{ name: 'CONTACT_EMAIL', visible: true }], agreements: []
+    },
+    captcha: { recaptcha: { use: true } },
+    presetFields: [
+      { fieldName: 'UF_CRM_CONSENT_VERSION', value: 'BTX v1' },
+      { fieldName: 'UF_CRM_VISITOR_ID', value: '%UF_VISITOR_ID%' }
+    ], result: { success: { url: 'https://example.com/thanks' } }
+  } }, DEFAULT_PROFILES.RU.requirements, DEFAULT_PROFILES.RU.presetRules, 0.9);
+  assert.equal(ruAnalysis.rows[0].score, 100);
+  assert.equal(ruAnalysis.rows[0].presetIssues, '');
+
+  var duplicateCause = scoreForm({
+    consentVersion: 'EN_2', language: 'de', hasEmail: true, redirectIssue: '', captcha: 'Y',
+    presetIssues: [{ field: 'UF_CRM_CONSENT_VERSION', value: 'EN_2' }], hasVisitorId: true
+  }, DEFAULT_PROFILES.Default.requirements);
+  assert.equal(duplicateCause.crit.length, 1);
+
+  var wrongLocale = scoreForm({
+    consentVersion: 'EN_1', language: 'fr', hasEmail: true, redirectIssue: '', captcha: 'Y',
+    presetIssues: [], hasVisitorId: true
+  }, DEFAULT_PROFILES.Default.requirements);
+  assert.equal(wrongLocale.severity, 'CRIT');
+});
+
+test('profile exclusions remove LATAM without treating Brazil as LATAM by default', function () {
+  var exclusions = DEFAULT_PROFILES.Default.exclusions;
+  assert.equal(shouldExcludeForm({ data: { language: 'la' }, name: 'EMEA_la_Form' }, exclusions), true);
+  assert.equal(shouldExcludeForm({ data: { language: 'es' }, name: 'Americas_es_Form' }, exclusions), true);
+  assert.equal(shouldExcludeForm({ data: { language: 'br' }, name: 'Brazil_br_Form' }, exclusions), false);
 });
 
 test('analyzer produces stable rows, exports, and diffs', function () {
@@ -109,6 +150,34 @@ test('analyzer produces stable rows, exports, and diffs', function () {
   assert.equal(sheets['Все формы'].length, 2);
   assert.equal(sheets['Дифф'].length, 2);
   assert.ok(sheetsToXlsx(XLSX, sheets).byteLength > 1000);
+});
+
+test('agreement conflicts affect forms and exact duplicates expose redirect-only variants', function () {
+  function form(id, redirect, agreementLabel) {
+    return {
+      name: 'EMEA_en_Download_' + id,
+      data: {
+        language: 'en', buttonCaption: 'Send', design: { theme: 'dark' },
+        fields: [{ name: 'CONTACT_EMAIL', visible: true, required: true }],
+        agreements: [{ id: 9, name: 'Privacy', label: agreementLabel }]
+      },
+      presetFields: [
+        { fieldName: 'UF_CRM_CONSENT_VERSION', value: 'EN_1' },
+        { fieldName: 'UF_CRM_VISITOR_ID', value: '%UF_VISITOR_ID%' }
+      ],
+      result: { success: { url: redirect, text: 'Thanks' } }
+    };
+  }
+  var result = analyze({
+    '1': form('1', 'https://example.com/a', 'Text A'),
+    '2': form('2', 'https://example.com/b', 'Text B')
+  }, DEFAULT_PROFILES.Default.requirements, DEFAULT_PROFILES.Default.presetRules, 0.9);
+  assert.equal(result.agrConflicts.length, 1);
+  assert.equal(result.rows[0].severity, 'CRIT');
+  assert.match(result.rows[0].crit, /конфликт текста соглашения 9/);
+  assert.equal(result.clusters[0].category, 'redirect_only');
+  var sheets = buildSheets(result, { errors: 0 }, [], [], 2, 0.9);
+  assert.equal(sheets['Дубли'][1][2], 'одинаковые поля, только другой редирект');
 });
 
 test('worker pool respects its concurrency limit and reports completion', async function () {

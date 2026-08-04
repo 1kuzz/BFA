@@ -42,6 +42,7 @@ export function buildSheets(A, perfStats, diffChanges, timelineRows, concurrency
     ['Повторов (retry)', perfStats.retries], ['Retry %', perfStats.retryPct],
     ['Ответов 429', perfStats.http429], ['Ответов 500', perfStats.http500], ['Ответов 503', perfStats.http503],
     ['Макс. пауза backoff, мс', perfStats.maxBackoffMs], ['Ошибок чтения', perfStats.errors],
+    ['Исключено профилем', perfStats.excludedForms || 0],
     ['Общее время, сек', perfStats.totalSec], ['Параллельность', concurrency]
   ];
 
@@ -84,8 +85,15 @@ export function buildSheets(A, perfStats, diffChanges, timelineRows, concurrency
   var consentMapSheet = [['Язык', 'Ожидаемый', 'Фактический', 'OK/ERROR', 'ID']];
   rows.forEach(function (r) { var exp = expectedConsent[r.language] || ''; consentMapSheet.push([r.language, exp, r.consentVersion || '(пусто)', (r.consentVersion === exp) ? 'OK' : 'ERROR', r.id]); });
 
-  var dupSheet = [['Язык', 'Форм', 'Тип', 'ID форм']];
-  clusters.forEach(function (c) { dupSheet.push([c.lang, c.size, c.exact ? 'точный' : 'почти (' + Math.round(dupTh * 100) + '%+)', c.ids.join(', ')]); });
+  var duplicateLabels = {
+    full_duplicate: 'полный дубль', redirect_only: 'одинаковые поля, только другой редирект',
+    field_variant: 'одинаковые поля, другие настройки', near_duplicate: 'почти-дубль'
+  };
+  var dupSheet = [['Язык', 'Форм', 'Категория', 'Различия', 'ID форм']];
+  clusters.forEach(function (c) {
+    var fallback = c.exact ? 'полный дубль' : 'почти (' + Math.round(dupTh * 100) + '%+)';
+    dupSheet.push([c.lang, c.size, duplicateLabels[c.category] || fallback, c.differences || '', c.ids.join(', ')]);
+  });
   var anomSheet = [['Поле', 'В формах', 'Проблема']]; anomalies.forEach(function (a) { anomSheet.push([a.field, a.count, a.flags]); });
   var consistSheet = [['Тип формы', 'Поле', 'Присутствует', 'Обязательное', 'Замечание']]; consistency.forEach(function (c) { consistSheet.push([c.formType, c.field, c.present, c.required, c.note]); });
   var agrConflSheet = [['Agreement ID', 'Name', 'Вариантов текста', 'Форм']]; agrConflicts.forEach(function (c) { agrConflSheet.push([c.id, c.name, c.variants, c.forms]); });
