@@ -118,6 +118,37 @@ test('preset rules and scoring report unsafe forms', function () {
   assert.equal(missingCaptcha.severity, 'CRIT');
 });
 
+test('recommendations only fire for requirements the active profile actually enables', function () {
+  var relaxed = Object.assign({}, DEFAULT_PROFILES.Default.requirements, {
+    requireConsentVersion: false, requireVisitorId: false, requireEmail: false, requireHttpsRedirect: false
+  });
+
+  var noConsent = scoreForm({
+    consentVersion: '', subscriptionVersion: '', language: 'fr', hasEmail: false,
+    redirectIssue: '', captcha: 'Y', presetIssues: [], hasVisitorId: false
+  }, relaxed);
+  assert.equal(noConsent.severity, 'OK');
+  assert.equal(noConsent.recommendations.indexOf('Добавить UF_CRM_CONSENT_VERSION'), -1);
+  assert.equal(noConsent.recommendations.indexOf('Добавить VisitorID (validator.js)'), -1);
+  assert.equal(noConsent.recommendations.indexOf('Добавить обязательный Email'), -1);
+
+  var httpRedirect = scoreForm({
+    consentVersion: 'BTX v1', subscriptionVersion: 'BTX v1', language: 'en', hasEmail: true,
+    redirectIssue: 'HTTP вместо HTTPS', captcha: 'Y', presetIssues: [], hasVisitorId: true
+  }, relaxed);
+  assert.equal(httpRedirect.severity, 'OK');
+  assert.equal(httpRedirect.recommendations.some(function (r) { return r.indexOf('Исправить редирект') > -1; }), false);
+
+  var strict = DEFAULT_PROFILES.Default.requirements;
+  var stillEnabled = scoreForm({
+    consentVersion: '', subscriptionVersion: '', language: 'fr', hasEmail: false,
+    redirectIssue: '', captcha: 'Y', presetIssues: [], hasVisitorId: false
+  }, strict);
+  assert.equal(stillEnabled.recommendations.indexOf('Добавить UF_CRM_CONSENT_VERSION') > -1, true);
+  assert.equal(stillEnabled.recommendations.indexOf('Добавить VisitorID (validator.js)') > -1, true);
+  assert.equal(stillEnabled.recommendations.indexOf('Добавить обязательный Email') > -1, true);
+});
+
 test('cache namespaces isolate RU and EU forms, snapshots, and history', function () {
   var eu = cacheNamespace('Default'), ru = cacheNamespace('RU');
   assert.notEqual(eu.formPrefix + '42', ru.formPrefix + '42');
