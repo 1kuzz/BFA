@@ -102,7 +102,9 @@ analyzers/
 ui/
   popup.html / popup.js     toolbar popup: run, profile picker, live progress
   options.html / options.js settings + rule profile editor
-  report.html / report.js   standalone dashboard (charts, filters, print)
+  report.html               dashboard shell, loads the built report.js
+  report.js                 built React dashboard (see ui/src/report, do not edit directly)
+  src/report/                React source for the dashboard - components, hooks, tableDef
   tokens.css                shared visual tokens and interaction states
 vendor/
   xlsx.full.min.js          bundled SheetJS, wrapped as an ES module (no CDN load, avoids CSP issues)
@@ -139,11 +141,24 @@ form data.
 
 ## Development
 
-Plain ES modules, no build step. Load the folder as an unpacked extension
-and reload it from `chrome://extensions` after making changes. The service
-worker can be inspected via **Service worker** → **Inspect** on the
-extension's card; the popup/options/report pages can be inspected like any
-normal page via DevTools.
+Plain ES modules, no build step for `core/`, `analyzers/`, or the
+popup/options UI - load the folder as an unpacked extension and reload it
+from `chrome://extensions` after making changes. The service worker can be
+inspected via **Service worker** → **Inspect** on the extension's card; the
+popup/options/report pages can be inspected like any normal page via
+DevTools.
+
+The one exception is the report dashboard: it's a React app built from
+`ui/src/report/` into the single self-contained `ui/report.js` (an IIFE,
+React bundled in - no CDN, no `type=module`, so it stays extension-CSP
+safe). `ui/report.js` is committed like the vendored `xlsx.full.min.js`
+bundle, so an unpacked install still needs no build step - but if you edit
+anything under `ui/src/report/`, rebuild and commit the result:
+
+```sh
+npm install       # once, pulls in vite/react as devDependencies
+npm run build     # rebuilds ui/report.js from ui/src/report/
+```
 
 Run the dependency-free checks with Node.js 20 or newer:
 

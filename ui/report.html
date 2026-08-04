@@ -111,73 +111,7 @@
 <link rel="stylesheet" href="tokens.css">
 </head>
 <body>
-  <header class="hero">
-    <div><h1>BFA Control Center</h1><div class="meta" id="meta"></div><div class="run-delta" id="runDelta"></div></div>
-    <span class="live">LIVE GOVERNANCE</span>
-  </header>
-
-  <div id="dashboard" style="display:none">
-    <div class="stats" id="stats"></div>
-    <div class="charts" id="charts"></div>
-
-    <section class="control" aria-labelledby="controlTitle">
-      <div class="control-head">
-        <div><h2 id="controlTitle">Управление формами</h2><div class="selection" id="selection">Выбрано: 0</div></div>
-        <div><button class="secondary" id="selectAll">Выбрать все формы</button> <button class="secondary" id="selectShown">Выбрать отфильтрованные</button> <button class="secondary" id="clearSelected">Очистить</button></div>
-      </div>
-      <div class="common">
-        <div class="control-head"><div><h2>Общие вопросы выбранных форм</h2><div class="selection" id="commonImpact"></div></div><label>Порог большинства: <output id="commonThresholdValue">80%</output> <input id="commonThreshold" type="range" min="50" max="100" value="80"></label></div>
-        <div class="common-help">Вопрос считается общим, когда встречается минимум в указанной доле выборки. Исключения можно проверить и убрать из выделения.</div>
-        <div class="common-wrap" id="commonQuestions">Выберите формы, чтобы увидеть общие вопросы.</div>
-      </div>
-      <div class="agreement-editor" id="agreementEditor">
-        <div class="control-head"><h2 id="agreementTitle">Единый текст соглашения</h2><button class="secondary" id="closeAgreement">Закрыть</button></div>
-        <label for="agreementVariant">Канонический вариант</label><select id="agreementVariant"></select>
-        <label for="agreementText">Текст соглашения</label><textarea id="agreementText"></textarea>
-        <div class="selection" id="agreementImpact"></div>
-        <button id="previewAgreement">Preview через approval-flow</button>
-      </div>
-      <h2>Расширенное массовое изменение</h2>
-      <div class="control-grid">
-        <div><label for="editKind">Изменение</label><select id="editKind">
-          <option value="name">Имя формы</option><option value="title">Заголовок</option>
-          <option value="buttonCaption">Текст кнопки</option><option value="successUrl">HTTPS-редирект</option>
-          <option value="preset">Существующее preset-поле</option><option value="label">Текст вопроса</option><option value="required">Обязательность поля</option>
-          <option value="visible">Видимость поля</option>
-        </select></div>
-        <div id="fieldWrap" style="display:none"><label for="editField">Поле</label><input id="editField" placeholder="CONTACT_EMAIL"></div>
-        <div><label for="editValue">Новое значение</label><input id="editValue" placeholder="Введите значение"><select id="editBoolean" style="display:none"><option value="true">Да</option><option value="false">Нет</option></select></div>
-        <button id="previewEdits">Preview</button>
-      </div>
-      <div class="preview" id="editPreview"></div>
-      <div class="approval" id="approval"><input id="confirmation" placeholder="Строка подтверждения"><button class="danger" id="applyEdits">Применить и проверить</button></div>
-    </section>
-
-    <section class="audit"><h2>Журнал изменений</h2><div id="audit">Изменений пока нет.</div></section>
-
-    <div class="tabs" id="tabs"></div>
-    <div class="reason-groups" id="reasonGroups"></div>
-
-    <div class="controls">
-      <input class="q" id="q" placeholder="Поиск...">
-      <select id="sev"><option value="">Все severity</option><option>CRIT</option><option>WARN</option><option>INFO</option><option>OK</option></select>
-      <button id="print">🖨 Печать / PDF</button>
-      <span id="pager"></span>
-    </div>
-
-    <div class="wrap"><table id="t"><thead></thead><tbody></tbody></table></div>
-  </div>
-
-  <div id="loading"><div class="skeleton" style="height:96px;margin-bottom:14px"></div><div class="skeleton" style="height:260px"></div></div>
-  <div class="empty-state" id="empty" style="display:none">
-    <strong>Данных анализа пока нет</strong><br>Откройте Bitrix24 и запустите анализ из попапа расширения.
-  </div>
-  <div id="toast" class="toast" role="status" aria-live="polite" style="display:none"></div>
-  <dialog id="duplicateDialog" aria-labelledby="duplicateDialogTitle">
-    <div class="dialog-head"><div><h2 id="duplicateDialogTitle">Сравнение дублей</h2><div class="meta" id="duplicateDialogMeta"></div></div><button class="secondary" id="closeDuplicate">Закрыть</button></div>
-    <div class="diff-matrix" id="duplicateMatrix"></div>
-  </dialog>
-
+  <div id="root"></div>
   <script src="report.js"></script>
 </body>
 </html>
