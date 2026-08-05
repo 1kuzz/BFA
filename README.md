@@ -21,6 +21,18 @@ sync, region-specific rule profiles, run history, and optional alerting.
   fields, required-field consistency across form types, agreement conflicts
   (same agreement ID with different text across forms), a consent map by
   language
+- **Localization awareness** — a form translated into another language is a
+  different form, not a duplicate. The locale is resolved from the declared
+  `data.language`, the form name, and — decisively — the language actually
+  detected in the question texts, so translations no longer collapse into
+  one "full duplicate" cluster just because their technical field names
+  match. Translation families get their own view (which languages exist,
+  which are missing, whether they all share one consent version)
+- **Question finder** — type a question the way it reads in the form
+  ("Email", then "Телефон"), and only the forms containing all of them
+  remain, in the language of the query, ranked by match; plus the forms with
+  the same fields and language but slightly different wording, ready for
+  one-click unification
 - **Interactive duplicate diff** — field/settings matrix with concrete values,
   keyboard/touch-friendly dialogs, duplicate badges in the form inventory,
   and a separate ownership warning when CRM assignees differ
@@ -28,7 +40,7 @@ sync, region-specific rule profiles, run history, and optional alerting.
   it through the existing preview, approval, readback, and rollback flow
 - **History & diff** — every run is compared against the previous snapshot
   (profile-isolated IndexedDB), with a per-form timeline of severity/consent changes
-- **Exports**: `Forms_Analysis.xlsx` (18+ sheets), `forms_analysis.jsonl`
+- **Exports**: `Forms_Analysis.xlsx` (19+ sheets), `forms_analysis.jsonl`
   (for BI ingestion), `forms_raw.json`
 - **Live dashboard** — labeled charts, neutral severity rows, run deltas,
   paginated tables, grouped reasons, keyboard navigation, and print-to-PDF
@@ -49,6 +61,43 @@ The v6 redesign combines 10 operational features in one workflow:
 8. **Verified apply and rollback** — every save is read back; failed verification restores the pre-edit form.
 9. **Governance trail** — 100 change runs and rollback backups for the latest 20 runs are retained.
 10. **Policy and evidence** — regional rule profiles, 30-run drift history, XLSX/JSONL/raw exports, and webhook alerts.
+
+### Finding forms by their questions
+
+The **Поиск форм по вопросам** panel at the bottom of the dashboard works the
+way a person actually looks for a form — by what it asks:
+
+1. Type the first question ("Email") and press Enter. The query's language is
+   detected, so an English question keeps English forms and «Почта» keeps
+   Russian ones. Ambiguous queries ("Telefon" is German, Polish and Czech at
+   once) fall back to the language of the strongest matches, and every other
+   language with matches is offered as a one-click chip.
+2. Add the next question. Narrowing is strict AND — a form must contain every
+   listed question — while ranking stays fuzzy: exact wording outranks a
+   differently worded question with the same meaning, matches by technical
+   field name and by cross-language meaning are labeled as such, and typos
+   ("Emial") still find the form.
+3. Below the results, forms with the **same fields in the same language but
+   different wording** are grouped per question. One click selects the group
+   for the common-question editor, which unifies the wording through the
+   existing preview → approval → readback → rollback flow.
+
+### How a form's locale is decided
+
+`data.language` is frequently empty or copy-pasted, so it is not trusted
+blindly. Each form gets a `Локаль` — the key that decides whether two forms
+are the same form:
+
+| Situation | Locale used |
+|---|---|
+| No declared language | language detected in the question texts, then the `REGION_lang_TYPE` name segment |
+| Declared language, content agrees | the declared language |
+| Declared `en`, questions clearly written in another language | the detected one, and the row is flagged as a mismatch |
+
+"Clearly" means a different script (Cyrillic vs Latin) or at least two
+dictionary words of another language — a single English word like "Email"
+inside a Russian form never flips its locale. Unknown codes are preserved as
+written, so profile exclusions such as `la` keep working.
 
 Bulk edits are intentionally limited to 1000 forms per approved batch. The
 extension updates only properties whose structure is present in the freshly
@@ -94,9 +143,11 @@ core/
   api.js                   retry/backoff + bounded-concurrency worker pool
   cache.js                 IndexedDB (form cache, run history, diff snapshot)
   filter.js                profile exclusions applied before analysis
+  lang.js                  language codes, script/vocabulary detection, form locale resolution
+  search.js                question matching, ranking, and wording-variant grouping
   rules.js                 rule profiles, preset validators, severity/score engine
 analyzers/
-  analyze.js               per-form scoring, duplicate clustering, anomaly/consistency checks
+  analyze.js               per-form scoring, locale-aware duplicate clustering, localization families, anomaly/consistency checks
   diff.js                   snapshot diffing between runs
   export.js                 builds all XLSX sheets + JSONL
 ui/
