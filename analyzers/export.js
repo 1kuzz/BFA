@@ -8,6 +8,7 @@ import { distrib } from './analyze.js';
 export function buildSheets(A, perfStats, diffChanges, timelineRows, concurrency, dupTh) {
   var rows = A.rows, sevCount = A.sevCount, clusters = A.clusters, anomalies = A.anomalies;
   var consistency = A.consistency, agreements = A.agreements, agrConflicts = A.agrConflicts;
+  var localizations = A.localizations || [];
   var presetAll = A.presetAll, fieldUsage = A.fieldUsage, requiredUsage = A.requiredUsage;
   var presetIssuesAll = A.presetIssuesAll, expectedConsent = A.expectedConsent;
 
@@ -28,6 +29,9 @@ export function buildSheets(A, perfStats, diffChanges, timelineRows, concurrency
     ['Уникальных соглашений', Object.keys(agreements).length],
     ['Конфликтов соглашений', agrConflicts.length],
     ['Уникальных наборов полей', uniqCount],
+    ['Семей локализаций', localizations.length],
+    ['Форм в локализованных семьях', localizations.reduce(function (sum, item) { return sum + item.size; }, 0)],
+    ['Локализаций с одинаковым консентом', localizations.filter(function (item) { return item.sharedConsent; }).length],
     ['Кластеров почти-дублей', clusters.length],
     ['Аномальных полей', anomalies.length],
     ['Проблем консистентности', consistency.length],
@@ -50,7 +54,7 @@ export function buildSheets(A, perfStats, diffChanges, timelineRows, concurrency
   [['ЯЗЫКИ', 'language'], ['РЕГИОН', 'region'], ['ТИП ФОРМЫ', 'formType'], ['ПРОДУКТ', 'product'], ['СУЩНОСТЬ', 'entity'], ['ТЕМА', 'theme'], ['ВЕРСИЯ КОНСЕНТА', 'consentVersion'], ['CAPTCHA', 'captcha'], ['DEDUPE', 'dedupe']]
     .forEach(function (b) { overview.push([b[0], '', '']); distrib(rows, b[1]).forEach(function (p) { overview.push(['', String(p[0]), p[1]]); }); overview.push([]); });
 
-  var allCols = [['Severity', 'severity'], ['Score', 'score'], ['ID', 'id'], ['Имя', 'name'], ['Язык', 'language'], ['Регион', 'region'], ['Тип', 'formType'], ['Продукт', 'product'], ['Сущность', 'entity'], ['Тема', 'theme'], ['Кнопка', 'buttonCaption'], ['Видимых', 'visibleCount'], ['Поля', 'visibleFields'], ['Обязательные', 'requiredFields'], ['Preset', 'presetCount'], ['Консент', 'consentVersion'], ['Подписка', 'subscriptionVersion'], ['VisitorID', 'hasVisitorId'], ['Marketo', 'hasMarketoId'], ['Captcha', 'captcha'], ['Callback', 'callback'], ['WhatsApp', 'whatsapp'], ['Integr', 'integration'], ['Email', 'hasEmail'], ['Phone', 'hasPhone'], ['Company', 'hasCompany'], ['Country', 'hasCountry'], ['UTM', 'utmCount'], ['Редирект', 'redirect'], ['Проблема редиректа', 'redirectIssue'], ['Невалидн. preset', 'presetIssues'], ['🔴 CRIT', 'crit'], ['🟡 WARN', 'warn'], ['🔵 INFO', 'info'], ['Рекомендации', 'recommendations']];
+  var allCols = [['Severity', 'severity'], ['Score', 'score'], ['ID', 'id'], ['Имя', 'name'], ['Язык', 'language'], ['Язык контента', 'contentLanguage'], ['Локаль', 'localeKey'], ['Источник языка', 'languageSource'], ['Язык не совпал', 'languageMismatch'], ['Регион', 'region'], ['Тип', 'formType'], ['Продукт', 'product'], ['Сущность', 'entity'], ['Тема', 'theme'], ['Кнопка', 'buttonCaption'], ['Видимых', 'visibleCount'], ['Поля', 'visibleFields'], ['Обязательные', 'requiredFields'], ['Preset', 'presetCount'], ['Консент', 'consentVersion'], ['Подписка', 'subscriptionVersion'], ['VisitorID', 'hasVisitorId'], ['Marketo', 'hasMarketoId'], ['Captcha', 'captcha'], ['Callback', 'callback'], ['WhatsApp', 'whatsapp'], ['Integr', 'integration'], ['Email', 'hasEmail'], ['Phone', 'hasPhone'], ['Company', 'hasCompany'], ['Country', 'hasCountry'], ['UTM', 'utmCount'], ['Редирект', 'redirect'], ['Проблема редиректа', 'redirectIssue'], ['Невалидн. preset', 'presetIssues'], ['🔴 CRIT', 'crit'], ['🟡 WARN', 'warn'], ['🔵 INFO', 'info'], ['Рекомендации', 'recommendations']];
   var allSheet = [allCols.map(function (c) { return c[0]; })];
   rows.forEach(function (r) { allSheet.push(allCols.map(function (c) { return r[c[1]]; })); });
 
@@ -90,15 +94,27 @@ export function buildSheets(A, perfStats, diffChanges, timelineRows, concurrency
     ownership_variant: 'одинаковые поля, разный ответственный',
     field_variant: 'одинаковые поля, другие настройки', near_duplicate: 'почти-дубль'
   };
-  var dupSheet = [['Язык', 'Форм', 'Категория', 'Различия', 'Ответственный различается', 'Ответственные по формам', 'Решение', 'ID форм']];
+  var dupSheet = [['Локаль', 'Форм', 'Категория', 'Различия', 'Ответственный различается', 'Ответственные по формам', 'Решение', 'ID форм', 'Языки форм']];
   clusters.forEach(function (c) {
     var fallback = c.exact ? 'полный дубль' : 'почти (' + Math.round(dupTh * 100) + '%+)';
     var owners = c.ownershipConflict ? c.ids.map(function (id) {
       return '#' + id + '=' + (c.responsibleValues[id] || '—');
     }).join(' / ') : '';
     dupSheet.push([c.lang, c.size, duplicateLabels[c.category] || fallback, c.differences || '',
-      c.ownershipConflict ? 'ДА — ручной review' : 'Нет', owners, c.decision || '', c.ids.join(', ')]);
+      c.ownershipConflict ? 'ДА — ручной review' : 'Нет', owners, c.decision || '', c.ids.join(', '),
+      (c.languages || []).join(', ')]);
   });
+  var locSheet = [['Набор полей', 'Полей', 'Языков', 'Форм', 'Формы по языкам', 'Консент по языкам', 'Одинаковый консент', 'Нет локализации на', 'Решение']];
+  localizations.forEach(function (family) {
+    locSheet.push([
+      family.signature, family.fields, family.locales.length, family.size,
+      family.locales.map(function (locale) { return locale + ': ' + family.byLocale[locale].join(', '); }).join(' | '),
+      family.locales.map(function (locale) { return locale + ': ' + family.consentByLocale[locale]; }).join(' | '),
+      family.sharedConsent ? 'ДА — проверить локальные версии' : 'Нет',
+      family.missingLocales.join(', '), family.decision
+    ]);
+  });
+
   var anomSheet = [['Поле', 'В формах', 'Проблема', 'Решение']];
   anomalies.forEach(function (a) { anomSheet.push([a.field, a.count, a.flags, a.decision || 'Ручная проверка']); });
   var consistSheet = [['Тип формы', 'Поле', 'Присутствует', 'Обязательное', 'Замечание']]; consistency.forEach(function (c) { consistSheet.push([c.formType, c.field, c.present, c.required, c.note]); });
@@ -112,7 +128,9 @@ export function buildSheets(A, perfStats, diffChanges, timelineRows, concurrency
   return {
     Summary: summary, Performance: perfSheet, 'Обзор': overview, 'Все формы': allSheet,
     'Проблемы': probSheet, 'Редиректы': redirSheet, 'Preset-валидация': presetValSheet,
-    'Automation': autoSheet, 'Дубли': dupSheet, 'Аномальные поля': anomSheet,
+    'Automation': autoSheet, 'Дубли': dupSheet,
+    'Локализации': localizations.length ? locSheet : null,
+    'Аномальные поля': anomSheet,
     'Консистентность': consistSheet, 'Соглашения': agrSheet,
     'Конфликты соглашений': agrConflicts.length ? agrConflSheet : null,
     'Скрытые поля': presetSheet, 'UTM': utmSheet, 'Использование полей': usageSheet,

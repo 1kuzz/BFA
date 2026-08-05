@@ -479,7 +479,8 @@ async function run(force) {
     lastResult = {
       generatedAt: new Date().toISOString(), profile: S.profileName,
       rows: A.rows, sevCount: A.sevCount, avgScore: A.avgScore, avgFields: A.avgFields,
-      clusters: A.clusters, anomalies: A.anomalies, consistency: A.consistency,
+      clusters: A.clusters, localizations: A.localizations, locales: A.locales,
+      anomalies: A.anomalies, consistency: A.consistency,
       agrConflicts: A.agrConflicts, presetIssuesAll: A.presetIssuesAll,
       expectedConsent: A.expectedConsent, fieldUsage: A.fieldUsage,
       perfStats: perfStats, diffChanges: diffChanges, timelineRows: timelineRows, historyStats: historyStats,

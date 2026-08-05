@@ -40,6 +40,25 @@
   .common table { min-width:900px; }
   .common input, .common select { width:100%; min-width:120px; }
   .common code { color:#93c5fd; font-size:11px; }
+  .finder { border-color:#2f5ea8; background:linear-gradient(135deg,#111c2f,#132340); margin-top:16px; }
+  .finder-input { display:grid; grid-template-columns:minmax(200px,2fr) auto auto auto; gap:8px; margin:10px 0; }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; background:#17253a; border:1px solid var(--line); font-size:12px; }
+  .chip b { font-weight:700; }
+  .chip-label { align-self:center; color:#9fb2cc; font-size:11px; }
+  .chip button { padding:0 4px; background:none; border:0; color:#9fb2cc; cursor:pointer; font-size:14px; line-height:1; }
+  .chip button:hover { color:var(--crit); }
+  .chip.lang { cursor:pointer; background:#0c2b38; border-color:#155e75; color:#a5f3fc; }
+  .chip.lang.active { background:var(--brand); border-color:var(--brand); color:#fff; }
+  .finder-wrap { overflow:auto; max-height:340px; }
+  .finder-wrap table { min-width:760px; }
+  .finder-variants { margin-top:14px; border-top:1px solid #2f5ea8; padding-top:12px; }
+  .match-bar { display:inline-block; width:54px; height:7px; border-radius:999px; background:var(--panel-soft); overflow:hidden; vertical-align:middle; margin-right:6px; }
+  .match-bar i { display:block; height:100%; background:var(--brand); }
+  .via { display:inline-block; padding:2px 6px; border-radius:999px; background:#17253a; color:#9fb2cc; font-size:10px; margin-left:5px; }
+  .variant-group { border:1px solid var(--line); border-radius:10px; padding:10px; margin-bottom:10px; background:var(--panel); }
+  .variant-group h4 { margin:0 0 6px; font-size:13px; }
+  .variant-group .meta { margin-bottom:8px; }
   .agreement-editor { display:none; margin:14px 0; padding:14px; border:1px solid var(--warn); border-radius:var(--radius); background:#241f13; }
   .agreement-editor.show { display:block; animation:toast-in .16s ease; }
   .agreement-editor textarea { width:100%; min-height:110px; margin:8px 0; }
@@ -97,7 +116,7 @@
   .wrap { overflow: auto; max-height: 68vh; }
   .empty { padding:40px; text-align:center; color:#9fb2cc; }
   @media (max-width:900px) {
-    .control-grid { grid-template-columns:1fr; } body { padding:12px; }
+    .control-grid, .finder-input { grid-template-columns:1fr; } body { padding:12px; }
     .common table { min-width:0; }
     .common thead { display:none; }
     .common tbody, .common tr, .common td { display:block; width:100%; }
@@ -106,7 +125,7 @@
     .common td::before { content:attr(data-label); display:block; color:#9fb2cc; font-size:10px; margin-bottom:3px; }
     .common .question-preview { width:100%; }
   }
-  @media print { .controls, .tabs, .control, .audit, .live { display:none; } th { position:static; } body { margin:0; background:#fff; color:#222; } }
+  @media print { .controls, .tabs, .control, .finder, .audit, .live { display:none; } th { position:static; } body { margin:0; background:#fff; color:#222; } }
 </style>
 <link rel="stylesheet" href="tokens.css">
 </head>
@@ -166,6 +185,35 @@
     </div>
 
     <div class="wrap"><table id="t"><thead></thead><tbody></tbody></table></div>
+
+    <section class="control finder" aria-labelledby="finderTitle">
+      <div class="control-head">
+        <div><h2 id="finderTitle">Поиск форм по вопросам</h2><div class="selection" id="finderImpact">Введите первый вопрос</div></div>
+        <div>
+          <label for="finderLang">Язык форм</label>
+          <select id="finderLang"><option value="auto">Авто (по языку запроса)</option><option value="">Любой язык</option></select>
+        </div>
+      </div>
+      <div class="common-help">
+        Пишите вопросы так, как они звучат в форме: «Email», затем «Телефон» и т.д. Каждый следующий вопрос
+        сужает выборку — остаются только формы, где есть <b>все</b> перечисленные вопросы, отсортированные по совпадению.
+        Язык определяется по запросу: английский «Email» оставит английские формы, «Почта» — русские.
+      </div>
+      <div class="finder-input">
+        <input id="finderInput" placeholder="Например: Email — и нажмите Enter">
+        <button id="finderAdd">Добавить вопрос</button>
+        <button class="secondary" id="finderClear">Очистить</button>
+        <button class="secondary" id="finderSelect">Выбрать найденные формы</button>
+      </div>
+      <div class="chips" id="finderChips"></div>
+      <div class="chips" id="finderLangChips"></div>
+      <div class="finder-wrap" id="finderResults"></div>
+      <div class="finder-variants">
+        <h2>Те же поля и язык — другие формулировки</h2>
+        <div class="common-help">Формы с точно таким же набором полей на том же языке, где вопросы названы по-разному. Выберите группу, чтобы свести формулировки к одной через блок «Общие вопросы».</div>
+        <div class="finder-wrap" id="finderVariants">Появится после первого запроса.</div>
+      </div>
+    </section>
   </div>
 
   <div id="loading"><div class="skeleton" style="height:96px;margin-bottom:14px"></div><div class="skeleton" style="height:260px"></div></div>
@@ -178,6 +226,6 @@
     <div class="diff-matrix" id="duplicateMatrix"></div>
   </dialog>
 
-  <script src="report.js"></script>
+  <script type="module" src="report.js"></script>
 </body>
 </html>

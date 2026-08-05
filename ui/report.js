@@ -1,3 +1,6 @@
+import { languageLabel } from '../core/lang.js';
+import { formLocale, searchForms, wordingVariants } from '../core/search.js';
+
 var $ = function (id) { return document.getElementById(id); };
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
@@ -6,6 +9,7 @@ var currentTab = 'forms';
 var selected = {}, lastFiltered = [], pendingPlan = null;
 var page = 1, pageSize = 100;
 var clusterByForm = {}, rowById = {}, activeAgreement = null;
+var finderQueries = [], finderLanguage = 'auto', lastFinderIds = [];
 
 function toast(message) {
   $('toast').textContent = message; $('toast').style.display = 'block';
@@ -84,6 +88,7 @@ var TABS = [
   { id: 'redirects', label: 'Редиректы' },
   { id: 'preset', label: 'Preset-валидация' },
   { id: 'dupes', label: 'Дубли' },
+  { id: 'localizations', label: 'Локализации' },
   { id: 'anomalies', label: 'Аномальные поля' },
   { id: 'consistency', label: 'Консистентность' },
   { id: 'agreements', label: 'Конфликты соглашений' },
@@ -113,12 +118,29 @@ function formIdCell(row) {
   return html(esc(row.id) + (index == null ? '' : duplicateButton(index, true)), row.id);
 }
 
+var LANGUAGE_SOURCES = {
+  declared: 'указан в форме', name: 'из названия формы',
+  content: 'распознан по вопросам', unknown: 'не определён'
+};
+/* Локаль формы: по ней формы считаются «одной и той же формой».
+   Показываем, откуда она взялась, и когда контент расходится с
+   объявленным языком — это как раз локализованная копия. */
+function localeCell(row) {
+  var locale = formLocale(row);
+  var title = LANGUAGE_SOURCES[row.languageSource] || 'не определён';
+  if (row.languageMismatch === 'Y') {
+    title = 'объявлен «' + (row.declaredLanguage || '—') + '», вопросы на «' + row.contentLanguage + '»';
+    return html('<span class="ownership-alert" title="' + esc(title) + '">' + esc(locale || '—') + '</span>', locale || '—');
+  }
+  return html('<span title="' + esc(title) + '">' + esc(locale || '—') + '</span>', locale || '—');
+}
+
 // определения колонок для каждой вкладки: [заголовок, функция -> значение]
 function tableDef(tab) {
   var rows = R.rows;
   if (tab === 'forms') return {
-    cols: ['Sev', 'Score', 'ID', 'Имя', 'Язык', 'Регион', 'Тип', 'Консент', 'Подписка', 'Email', 'VisitorID', 'Captcha', 'Редирект', 'CRIT', 'WARN', 'Рекомендации'],
-    data: rows.map(function (r) { return { id: r.id, sev: r.severity, cells: [html('<span class="sev-chip">' + esc(r.severity) + '</span>', r.severity), r.score, formIdCell(r), r.name, r.language, r.region, r.formType, r.consentVersion, r.subscriptionVersion, r.hasEmail, r.hasVisitorId, r.captcha, r.redirect, r.crit, r.warn, r.recommendations] }; })
+    cols: ['Sev', 'Score', 'ID', 'Имя', 'Язык', 'Локаль', 'Регион', 'Тип', 'Консент', 'Подписка', 'Email', 'VisitorID', 'Captcha', 'Редирект', 'CRIT', 'WARN', 'Рекомендации'],
+    data: rows.map(function (r) { return { id: r.id, sev: r.severity, cells: [html('<span class="sev-chip">' + esc(r.severity) + '</span>', r.severity), r.score, formIdCell(r), r.name, r.language, localeCell(r), r.region, r.formType, r.consentVersion, r.subscriptionVersion, r.hasEmail, r.hasVisitorId, r.captcha, r.redirect, r.crit, r.warn, r.recommendations] }; })
   };
   if (tab === 'problems') return {
     cols: ['Sev', 'Score', 'ID', 'Имя', 'Язык', 'CRIT', 'WARN', 'Рекомендации'],
@@ -135,10 +157,27 @@ function tableDef(tab) {
     })
   };
   if (tab === 'dupes') return {
-    cols: ['Сравнить', 'Язык', 'Форм', 'Категория', 'Различия', 'Ответственный', 'Решение', 'ID форм'],
+    cols: ['Сравнить', 'Локаль', 'Форм', 'Категория', 'Различия', 'Ответственный', 'Решение', 'ID форм'],
     data: R.clusters.map(function (c, index) {
       var ownership = c.ownershipConflict ? html('<span class="ownership-alert">Требует ручного review</span>', 'Ответственный различается') : 'Совпадает';
-      return { sev: c.ownershipConflict ? 'CRIT' : 'INFO', cells: [html(duplicateButton(index, false), 'сравнить'), c.lang, c.size, DUPLICATE_LABELS[c.category] || 'дубль', c.differences || '', ownership, c.decision || '', c.ids.join(', ')] };
+      return { sev: c.ownershipConflict ? 'CRIT' : 'INFO', cells: [html(duplicateButton(index, false), 'сравнить'), c.localeLabel || c.lang, c.size, DUPLICATE_LABELS[c.category] || 'дубль', c.differences || '', ownership, c.decision || '', c.ids.join(', ')] };
+    })
+  };
+  if (tab === 'localizations') return {
+    cols: ['Набор полей', 'Языков', 'Форм', 'Формы по языкам', 'Консент по языкам', 'Нет локализации на', 'Решение'],
+    data: (R.localizations || []).map(function (family) {
+      var byLocale = family.locales.map(function (locale) {
+        return languageLabel(locale) + ': ' + family.byLocale[locale].map(function (id) { return '#' + id; }).join(' ');
+      }).join(' · ');
+      var consent = family.locales.map(function (locale) {
+        return locale + ': ' + family.consentByLocale[locale];
+      }).join(' · ');
+      return {
+        sev: family.sharedConsent ? 'WARN' : 'INFO',
+        cells: [family.signature, family.locales.length, family.size, byLocale,
+          family.sharedConsent ? html('<span class="ownership-alert">' + esc(consent) + '</span>', consent) : consent,
+          family.missingLocales.join(', ') || '—', family.decision]
+      };
     })
   };
   if (tab === 'anomalies') return {
@@ -355,6 +394,8 @@ function render() {
   renderTabs();
   renderReasonGroups();
   renderTable();
+  fillLanguageOptions();
+  renderFinder();
   updateSelection();
   $('q').oninput = function () { page = 1; renderTable(); };
   $('sev').onchange = function () { page = 1; renderTable(); };
@@ -471,6 +512,189 @@ function updateSelection() {
   $('selection').textContent = 'Выбрано: ' + Object.keys(selected).length;
   renderCommonQuestions();
 }
+
+/* ---- Поиск форм по вопросам ------------------------------------- */
+
+/* 1 форма / 2 формы / 5 форм */
+function plural(count, variants) {
+  var mod100 = count % 100, mod10 = count % 10;
+  if (mod100 > 10 && mod100 < 20) return variants[2];
+  if (mod10 === 1) return variants[0];
+  if (mod10 > 1 && mod10 < 5) return variants[1];
+  return variants[2];
+}
+function formCount(count) { return count + ' ' + plural(count, ['форма', 'формы', 'форм']); }
+
+function matchBar(score) {
+  var percent = Math.round(score * 100);
+  return '<span class="match-bar"><i style="width:' + percent + '%"></i></span>' + percent + '%';
+}
+
+var MATCH_VIA = { label: 'по тексту вопроса', field: 'по имени поля', concept: 'по смыслу' };
+
+function fillLanguageOptions() {
+  var present = {};
+  R.rows.forEach(function (row) { var locale = formLocale(row); if (locale) present[locale] = (present[locale] || 0) + 1; });
+  var codes = Object.keys(present).sort(function (a, b) { return present[b] - present[a]; });
+  $('finderLang').innerHTML = '<option value="auto">Авто (по языку запроса)</option><option value="">Любой язык</option>' +
+    codes.map(function (code) {
+      return '<option value="' + esc(code) + '">' + esc(languageLabel(code)) + ' · ' + present[code] + '</option>';
+    }).join('');
+  $('finderLang').value = finderLanguage;
+  if ($('finderLang').value !== finderLanguage) { finderLanguage = 'auto'; $('finderLang').value = 'auto'; }
+}
+
+function renderFinderChips() {
+  $('finderChips').innerHTML = finderQueries.map(function (query, index) {
+    return '<span class="chip"><b>' + (index + 1) + '.</b> ' + esc(query) +
+      '<button data-remove="' + index + '" title="Убрать вопрос" aria-label="Убрать вопрос">×</button></span>';
+  }).join('');
+  [].forEach.call($('finderChips').querySelectorAll('[data-remove]'), function (button) {
+    button.onclick = function () {
+      finderQueries.splice(parseInt(button.getAttribute('data-remove')), 1);
+      persistFinder(); renderFinder();
+    };
+  });
+}
+
+function persistFinder() {
+  chrome.storage.local.set({ finderQueries: finderQueries, finderLanguage: finderLanguage });
+}
+
+function renderFinderResults(found) {
+  if (!found.results.length) {
+    $('finderResults').innerHTML = '<div class="empty">Ни одна форма ' +
+      (found.language ? 'на языке «' + esc(languageLabel(found.language)) + '» ' : '') +
+      'не содержит все указанные вопросы. Уберите последний вопрос или смените язык.</div>';
+    return;
+  }
+  var head = '<tr><th>✓</th><th>Совпадение</th><th>ID</th><th>Имя</th><th>Локаль</th>' +
+    found.queries.map(function (query) { return '<th>' + esc(query) + '</th>'; }).join('') +
+    '<th>Полей</th><th>Sev</th></tr>';
+  var body = found.results.map(function (result) {
+    var row = result.row;
+    return '<tr class="sev-row sev-' + esc(row.severity) + '"><td><input type="checkbox" data-finder-id="' + esc(row.id) + '"' +
+      (selected[row.id] ? ' checked' : '') + '></td>' +
+      '<td>' + matchBar(result.score) + '</td><td>#' + esc(row.id) + '</td>' +
+      '<td class="long" title="' + esc(row.name) + '">' + esc(row.name) + '</td>' +
+      '<td>' + esc(result.locale || '—') + '</td>' +
+      result.matches.map(function (match) {
+        return '<td class="long" title="' + esc(match.name) + '">' + esc(match.label) +
+          '<span class="via">' + esc(MATCH_VIA[match.via] || match.via) + ' · ' + Math.round(match.score * 100) + '%</span></td>';
+      }).join('') +
+      '<td>' + esc(row.visibleCount) + '</td><td><span class="sev-chip">' + esc(row.severity) + '</span></td></tr>';
+  }).join('');
+  $('finderResults').innerHTML = '<table><thead>' + head + '</thead><tbody>' + body + '</tbody></table>';
+  [].forEach.call($('finderResults').querySelectorAll('[data-finder-id]'), function (box) {
+    box.onchange = function () {
+      var id = box.getAttribute('data-finder-id');
+      if (box.checked) selected[id] = true; else delete selected[id];
+      updateSelection(); renderTable();
+    };
+  });
+}
+
+function renderFinderVariants(groups) {
+  if (!groups.length) {
+    $('finderVariants').innerHTML = '<div class="empty">Формулировки во всех найденных формах совпадают — унифицировать нечего.</div>';
+    return;
+  }
+  $('finderVariants').innerHTML = groups.slice(0, 12).map(function (group, index) {
+    var questions = group.questions;
+    var head = '<tr><th>Форма</th>' + questions.map(function (question) {
+      return '<th>' + esc(question.name) + '</th>';
+    }).join('') + '</tr>';
+    var body = group.forms.map(function (form) {
+      return '<tr' + (form.matched ? ' class="sev-row sev-OK"' : '') + '><td class="long" title="' + esc(form.name) + '">#' +
+        esc(form.id) + ' ' + esc(form.name) + '</td>' + questions.map(function (question) {
+          return '<td class="long">' + esc(form.labels[question.name]) + '</td>';
+        }).join('') + '</tr>';
+    }).join('');
+    var variantCounts = questions.map(function (question) {
+      return esc(question.name) + ' — ' + question.variants.length + ' ' +
+        plural(question.variants.length, ['формулировка', 'формулировки', 'формулировок']);
+    }).join(' · ');
+    return '<div class="variant-group"><h4>' + esc(languageLabel(group.locale)) + ' · ' + formCount(group.size) +
+      ' · ' + esc(group.signature) + '</h4><div class="meta">' + variantCounts + '</div>' +
+      '<div class="finder-wrap"><table><thead>' + head + '</thead><tbody>' + body + '</tbody></table></div>' +
+      '<button class="secondary variant-select" data-ids="' + esc(group.ids.join(',')) + '" data-index="' + index +
+      '">Выбрать эти ' + formCount(group.size) + ' для унификации</button></div>';
+  }).join('');
+  [].forEach.call($('finderVariants').querySelectorAll('.variant-select'), function (button) {
+    button.onclick = function () {
+      selected = {};
+      button.getAttribute('data-ids').split(',').filter(Boolean).forEach(function (id) { selected[id] = true; });
+      updateSelection(); renderTable();
+      $('controlTitle').scrollIntoView({ behavior: 'smooth' });
+      toast('Формы выбраны — задайте единое название вопроса в «Общих вопросах»');
+    };
+  });
+}
+
+function renderFinder() {
+  if (!R) return;
+  renderFinderChips();
+  if (!finderQueries.length) {
+    $('finderImpact').textContent = 'Введите первый вопрос';
+    $('finderResults').innerHTML = '<div class="empty">Пока ничего не задано. Первый вопрос сузит список форм, второй — ещё сильнее.</div>';
+    $('finderLangChips').innerHTML = '';
+    $('finderVariants').innerHTML = 'Появится после первого запроса.';
+    lastFinderIds = [];
+    return;
+  }
+  var found = searchForms(R.rows, finderQueries, { language: finderLanguage });
+  lastFinderIds = found.results.map(function (result) { return result.id; });
+
+  var reason = found.languageSource === 'query' ? 'по языку запроса' :
+    found.languageSource === 'manual' ? 'выбран вручную' :
+    found.languageSource === 'matches' ? 'по лучшим совпадениям' : '';
+  $('finderImpact').textContent = formCount(found.results.length) + ' из ' + found.total +
+    ' · ' + found.queries.length + ' ' + plural(found.queries.length, ['вопрос', 'вопроса', 'вопросов']) + ' в запросе' +
+    (found.language ? ' · язык: ' + languageLabel(found.language) + (reason ? ' (' + reason + ')' : '') : ' · язык: любой');
+
+  $('finderLangChips').innerHTML = found.languageCounts.length > 1 ? '<span class="chip-label">Совпадения есть и на других языках:</span>' +
+    found.languageCounts.map(function (item) {
+      return '<button class="chip lang' + (item.language === found.language ? ' active' : '') +
+        '" data-lang="' + esc(item.language) + '">' + esc(languageLabel(item.language)) + ' · ' + item.count + '</button>';
+    }).join('') : '';
+  [].forEach.call($('finderLangChips').querySelectorAll('[data-lang]'), function (button) {
+    button.onclick = function () {
+      finderLanguage = button.getAttribute('data-lang');
+      $('finderLang').value = finderLanguage;
+      persistFinder(); renderFinder();
+    };
+  });
+
+  renderFinderResults(found);
+  renderFinderVariants(wordingVariants(R.rows, found.results, { queries: found.queries }));
+}
+
+function addFinderQuery() {
+  var value = $('finderInput').value.trim();
+  if (!value) return;
+  if (finderQueries.some(function (query) { return query.toLowerCase() === value.toLowerCase(); })) {
+    toast('Такой вопрос уже добавлен'); return;
+  }
+  finderQueries.push(value);
+  $('finderInput').value = '';
+  persistFinder(); renderFinder();
+}
+
+$('finderAdd').onclick = addFinderQuery;
+$('finderInput').onkeydown = function (event) {
+  if (event.key === 'Enter') { event.preventDefault(); addFinderQuery(); }
+};
+$('finderClear').onclick = function () {
+  finderQueries = []; $('finderInput').value = '';
+  persistFinder(); renderFinder();
+};
+$('finderLang').onchange = function () { finderLanguage = this.value; persistFinder(); renderFinder(); };
+$('finderSelect').onclick = function () {
+  if (!lastFinderIds.length) { toast('Сначала найдите формы по вопросам'); return; }
+  lastFinderIds.forEach(function (id) { selected[id] = true; });
+  updateSelection(); renderTable();
+  toast('Найденные формы добавлены к выделению');
+};
 
 function updateEditor() {
   var kind = $('editKind').value;
@@ -590,8 +814,10 @@ updateEditor();
 loadAudit();
 
 function load() {
-  chrome.storage.local.get(['lastResult', 'commonThreshold'], function (d) {
+  chrome.storage.local.get(['lastResult', 'commonThreshold', 'finderQueries', 'finderLanguage'], function (d) {
     if (d.commonThreshold >= 50 && d.commonThreshold <= 100) $('commonThreshold').value = d.commonThreshold;
+    if (Array.isArray(d.finderQueries)) finderQueries = d.finderQueries.filter(Boolean);
+    if (typeof d.finderLanguage === 'string') finderLanguage = d.finderLanguage;
     if (d.lastResult && d.lastResult.rows) { R = d.lastResult; render(); return; }
     $('loading').style.display = 'none'; $('empty').style.display = 'block';
   });

@@ -6,8 +6,15 @@
    ============================================================ */
 import { clean } from '../core/api.js';
 import { makeValidator, scoreForm } from '../core/rules.js';
+import { languageLabel, resolveFormLanguage } from '../core/lang.js';
 
 var SCHEME = { '1': 'Лид', '2': 'Контакт', '3': 'Динам. сущность' };
+
+/* Подпись формы = отсортированный набор видимых технических полей.
+   У переводов одной формы она совпадает, у разных форм — нет. */
+export function fieldSignature(visibleFields) {
+  return String(visibleFields || '').split(', ').filter(Boolean).sort().join('\u001f');
+}
 
 function parseName(nm) {
   var p = nm.split(/[_|]/).map(function (s) { return s.trim(); }).filter(Boolean);
@@ -134,7 +141,16 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
       agreements[aid].forms.push(id);
     });
 
-    var lang = d.language || '', cv = pmap['UF_CRM_CONSENT_VERSION'] || '', sv = pmap['UF_CRM_SUBSCRIPTION_VERSION'] || '';
+    /* Язык формы: объявленный, из имени или распознанный по текстам
+       вопросов. localeKey разводит локализации по разным группам,
+       иначе перевод формы выглядит полным дублем — набор технических
+       полей у переводов одинаковый. */
+    var localeTexts = questions.map(function (q) { return q.label; })
+      .concat([clean(d.title), clean(d.buttonCaption), clean(succ.text)])
+      .concat((d.agreements || []).map(function (a) { return clean(a.label); }));
+    var locale = resolveFormLanguage({ declared: d.language, name: clean(top.name), texts: localeTexts });
+
+    var lang = locale.language, cv = pmap['UF_CRM_CONSENT_VERSION'] || '', sv = pmap['UF_CRM_SUBSCRIPTION_VERSION'] || '';
     var cap = top.captcha || {}, capOn = ((cap.recaptcha || {}).use || (cap.yandexCaptcha || {}).use) ? 'Y' : 'N';
     var callbackOn = (top.callback && top.callback.use) ? 'Y' : 'N';
     var whatsappOn = (top.whatsapp && top.whatsapp.use) ? 'Y' : 'N';
@@ -164,7 +180,11 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
     var utm = ['SOURCE', 'MEDIUM', 'CAMPAIGN', 'CONTENT', 'TERM'].map(function (u) { return pmap['UF_CRM_UTM_' + u] || ''; });
 
     rows.push({
-      id: id, name: clean(top.name), language: lang, entity: entity, region: nmeta.region, formType: nmeta.formType, product: nmeta.product, color: nmeta.color,
+      id: id, name: clean(top.name), language: lang,
+      declaredLanguage: locale.declaredLanguage, contentLanguage: locale.contentLanguage,
+      localeKey: locale.localeKey, languageSource: locale.source,
+      languageConfidence: locale.confidence, languageMismatch: locale.mismatch ? 'Y' : 'N',
+      entity: entity, region: nmeta.region, formType: nmeta.formType, product: nmeta.product, color: nmeta.color,
       theme: (d.design || {}).theme || '', buttonCaption: clean(d.buttonCaption),
       visibleCount: visible.length, visibleFields: visNames.join(', '),
       questions: questions,
@@ -226,9 +246,10 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
   var expectedConsent = {};
   Object.keys(byLang).forEach(function (l) { var best = '', bc = -1; Object.keys(byLang[l]).forEach(function (v) { if (byLang[l][v] > bc) { bc = byLang[l][v]; best = v; } }); expectedConsent[l] = best; });
 
-  // нечёткие дубли
+  // нечёткие дубли — только внутри одной локали:
+  // перевод формы на другой язык это отдельная форма, а не дубль
   var langGroups = {};
-  rows.forEach(function (r) { (langGroups[r.language] = langGroups[r.language] || []).push(r.id); });
+  rows.forEach(function (r) { (langGroups[r.localeKey] = langGroups[r.localeKey] || []).push(r.id); });
   var clusters = [];
   Object.keys(langGroups).forEach(function (l) {
     var g = langGroups[l], used = {};
@@ -244,7 +265,7 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
       });
       if (cl.length > 1) {
         var exact = new Set(cl.map(function (i) {
-          return rowById[i].visibleFields.split(', ').filter(Boolean).sort().join('\u001f');
+          return fieldSignature(rowById[i].visibleFields);
         })).size === 1;
         var diff = clusterDiff(cl, rowById);
         var category = 'near_duplicate', differences = diff.diffFields.join(', ') || 'поля';
@@ -272,7 +293,9 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
           campaignVariation ? 'Кампанийная вариация — не схлопывать автоматически' :
           category === 'full_duplicate' ? 'Кандидат на схлопывание' : 'Ручной review';
         clusters.push({
-          lang: l, size: cl.length, ids: cl, exact: exact, category: category,
+          lang: l, locale: l, localeLabel: languageLabel(l),
+          languages: Array.from(new Set(cl.map(function (i) { return rowById[i].language || '—'; }))).sort(),
+          size: cl.length, ids: cl, exact: exact, category: category,
           differences: differences, diffFields: diff.diffFields, diffMatrix: diff.matrix,
           ownershipConflict: diff.ownershipConflict, responsibleValues: diff.responsibleValues,
           decision: decision
@@ -281,6 +304,54 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
     });
   });
   clusters.sort(function (a, b) { return b.size - a.size; });
+
+  /* Семьи локализаций: один и тот же набор полей на разных языках.
+     Это НЕ дубли — это переводы одной формы, и смотреть на них надо
+     вместе: где расходится консент, каких языков не хватает. */
+  var fleetLocales = {};
+  rows.forEach(function (r) { if (r.localeKey) fleetLocales[r.localeKey] = (fleetLocales[r.localeKey] || 0) + 1; });
+  var knownLocales = Object.keys(fleetLocales).sort(function (a, b) { return fleetLocales[b] - fleetLocales[a]; });
+
+  var signatureGroups = {};
+  rows.forEach(function (r) {
+    var signature = fieldSignature(r.visibleFields);
+    if (!signature) return;
+    (signatureGroups[signature] = signatureGroups[signature] || []).push(r);
+  });
+  var localizations = [];
+  Object.keys(signatureGroups).forEach(function (signature) {
+    var group = signatureGroups[signature], byLocale = {};
+    group.forEach(function (r) {
+      var key = r.localeKey || '(не определён)';
+      (byLocale[key] = byLocale[key] || []).push(r.id);
+    });
+    var locales = Object.keys(byLocale).sort();
+    if (locales.length < 2) return;
+    var consentByLocale = {};
+    locales.forEach(function (key) {
+      consentByLocale[key] = Array.from(new Set(byLocale[key].map(function (id) {
+        return rowById[id].consentVersion || '(пусто)';
+      }))).join(', ');
+    });
+    var sharedConsent = Array.from(new Set(locales.map(function (key) { return consentByLocale[key]; })));
+    localizations.push({
+      signature: group[0].visibleFields, fields: group[0].visibleCount,
+      formTypes: Array.from(new Set(group.map(function (r) { return r.formType || '(без типа)'; }))).sort(),
+      products: Array.from(new Set(group.map(function (r) { return r.product; }).filter(Boolean))).sort(),
+      size: group.length, locales: locales, localeLabels: locales.map(languageLabel),
+      byLocale: byLocale, consentByLocale: consentByLocale,
+      sharedConsent: sharedConsent.length === 1 && locales.length > 1,
+      missingLocales: knownLocales.filter(function (key) { return locales.indexOf(key) < 0; }),
+      ids: group.map(function (r) { return r.id; }),
+      decision: sharedConsent.length === 1 && locales.length > 1 ?
+        'Локализации с одинаковым консентом — проверьте локальные версии согласия' :
+        'Локализации одной формы — не схлопывать'
+    });
+  });
+  localizations.sort(function (a, b) {
+    if (b.locales.length !== a.locales.length) return b.locales.length - a.locales.length;
+    return b.size - a.size;
+  });
 
   // аномальные поля
   var anomalies = [];
@@ -321,7 +392,8 @@ export function analyze(raw, RULES, presetRules, dupThreshold) {
     rows: rows, rowById: rowById, sevCount: sevCount, avgFields: avgFields, avgScore: avgScore,
     presetAll: presetAll, agreements: agreements, fieldUsage: fieldUsage, requiredUsage: requiredUsage,
     presetIssuesAll: presetIssuesAll, expectedConsent: expectedConsent, clusters: clusters,
-    anomalies: anomalies, consistency: consistency, agrConflicts: agrConflicts
+    anomalies: anomalies, consistency: consistency, agrConflicts: agrConflicts,
+    localizations: localizations, locales: knownLocales
   };
 }
 
